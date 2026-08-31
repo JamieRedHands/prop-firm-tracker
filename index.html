@@ -1,0 +1,2990 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Position sizing, rule checks and a trade journal for Breakout Prop evaluations, with live OKX prices.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
+<style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>Breakout Eval Edge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    color-scheme: dark;
+    --page:#0e1216; --surface:#151b21; --raised:#1b232b; --inset:#10161b;
+    --border:rgba(255,255,255,.09); --hairline:rgba(255,255,255,.06);
+    --ink:#edf2f6; --sub:#9daab6; --muted:#6c7884;
+    --accent:#f0a232; --accent-ink:#1a1204;
+    --good:#22b455; --bad:#e66767; --warn:#e0a32e;
+    --line:#3987e5; --seg-daily:#d95926; --seg-max:#e66767;
+    --grid:#232b33; --axis:#39434d;
+    --tip-bg:#1f2831; --tip-ink:#edf2f6;
+    --focus:#7db4f0;
+  }
+  *{box-sizing:border-box}
+  body{
+    background:var(--page); color:var(--ink);
+    font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+    font-size:14.5px; line-height:1.5; margin:0; padding:0;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding:24px 20px 64px}
+  header.masthead{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:14px; justify-content:space-between}
+  h1{font-family:Archivo,system-ui,sans-serif; font-weight:800; font-size:clamp(21px,3vw,29px);
+     letter-spacing:-.01em; margin:0; text-wrap:balance}
+  #resetBtn{background:none; border:1px solid var(--border); color:var(--sub); border-radius:7px;
+            font:inherit; font-size:12.5px; padding:5px 12px; cursor:pointer}
+  #resetBtn:hover{color:var(--ink); border-color:var(--muted)}
+  button:focus-visible{outline:2px solid var(--focus); outline-offset:1px}
+
+  /* tabs */
+  .tabs{display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:20px; flex-wrap:wrap}
+  .tabs button{background:none; border:none; border-bottom:2px solid transparent; color:var(--sub);
+    font:inherit; font-weight:500; padding:9px 14px; cursor:pointer; margin-bottom:-1px; border-radius:6px 6px 0 0}
+  .tabs button:hover{color:var(--ink)}
+  .tabs button[aria-selected="true"]{color:var(--ink); border-bottom-color:var(--accent); font-weight:600}
+  .tabs .badge{font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--muted); margin-left:6px}
+
+  .cols{display:grid; grid-template-columns:330px 1fr; gap:22px; align-items:start}
+  @media (max-width:920px){ .cols{grid-template-columns:1fr} .rail{position:static} }
+
+  /* Two-pane scrolling: on a wide screen the masthead and tabs stay put and each column owns
+     its own scrollbar, so the side under the cursor is the side that moves. overscroll-behavior
+     stops a pane that has hit its end from dragging the other one along with it. */
+  @media (min-width:921px){
+    html, body{height:100%; overflow:hidden}
+    .wrap{height:100dvh; display:flex; flex-direction:column; padding-bottom:0}
+    .wrap > [role="tabpanel"]{flex:1; min-height:0; display:flex; flex-direction:column}
+    .cols{flex:1; min-height:0}
+    .cols > .rail{position:static}   /* sticky is meaningless once the rail is its own scroller */
+    .rail, .cols > .results, [role="tabpanel"] > .results{
+      height:100%; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+      padding:1px 10px 28px 1px; scrollbar-width:thin; scrollbar-color:var(--axis) transparent;
+    }
+    .rail::-webkit-scrollbar, .results::-webkit-scrollbar{width:9px}
+    .rail::-webkit-scrollbar-thumb, .results::-webkit-scrollbar-thumb{
+      background:var(--axis); border-radius:5px; border:2px solid var(--page)}
+    .rail::-webkit-scrollbar-thumb:hover, .results::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+    .rail::-webkit-scrollbar-track, .results::-webkit-scrollbar-track{background:transparent}
+  }
+
+  /* ---------- input rail ---------- */
+  .rail{position:sticky; top:16px; display:flex; flex-direction:column; gap:14px}
+  .panel{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px 16px 14px}
+  .panel h2{font-family:Archivo,system-ui,sans-serif; font-size:12px; font-weight:700; text-transform:uppercase;
+            letter-spacing:.09em; color:var(--muted); margin:0 0 12px; display:flex; justify-content:space-between; align-items:center; gap:8px}
+  .field{display:flex; flex-direction:column; gap:5px; margin-bottom:12px}
+  .field:last-child{margin-bottom:2px}
+  .field > label{display:flex; justify-content:space-between; align-items:baseline; gap:8px}
+  .field .lbl{font-weight:500}
+  .field .val{font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--accent); font-weight:600}
+  .duo{display:flex; gap:10px; align-items:center}
+  input[type=range]{flex:1; accent-color:var(--accent); height:22px; margin:0}
+  input[type=number], input[type=text], input[type=date], select, textarea{
+    background:var(--inset); color:var(--ink); border:1px solid var(--border); border-radius:7px;
+    font-family:"IBM Plex Mono",monospace; font-size:13px; padding:6px 8px; width:100%;
+  }
+  textarea{font-family:"IBM Plex Sans",sans-serif; resize:vertical}
+  .duo input[type=number]{width:84px; flex:none}
+  input:focus-visible, select:focus-visible, textarea:focus-visible{outline:2px solid var(--focus); outline-offset:1px}
+  input:disabled, select:disabled{opacity:.5; cursor:not-allowed}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+  .grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:10px}
+  .hint{font-size:12px; color:var(--muted); margin-top:2px}
+
+  /* toggle */
+  .toggle{display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-size:12px;
+          color:var(--sub); text-transform:none; letter-spacing:0; font-weight:500}
+  .toggle input{appearance:none; width:30px; height:17px; border-radius:9px; background:var(--inset);
+    border:1px solid var(--border); position:relative; cursor:pointer; margin:0; flex:none; transition:background .18s}
+  .toggle input::after{content:""; position:absolute; top:1.5px; left:2px; width:11px; height:11px; border-radius:50%;
+    background:var(--muted); transition:transform .18s, background .18s}
+  .toggle input:checked{background:var(--accent); border-color:var(--accent)}
+  .toggle input:checked::after{transform:translateX(13px); background:var(--accent-ink)}
+  .toggle input:focus-visible{outline:2px solid var(--focus); outline-offset:1px}
+
+  /* ---------- results ---------- */
+  .results{display:flex; flex-direction:column; gap:16px; min-width:0}
+  .hero{background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:22px 24px;
+        display:flex; flex-wrap:wrap; gap:8px 40px; align-items:flex-end; justify-content:space-between}
+  .hero .k{font-size:12px; text-transform:uppercase; letter-spacing:.09em; color:var(--muted); font-weight:600}
+  .hero .ev{font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:clamp(32px,4.6vw,48px);
+            line-height:1.05; letter-spacing:-.02em}
+  .hero .ev.pos{color:var(--good)} .hero .ev.neg{color:var(--bad)} .hero .ev.warn{color:var(--warn)}
+  .hero .side{display:flex; gap:26px; flex-wrap:wrap; padding-bottom:6px}
+  .hero .side .k{margin-bottom:2px}
+  .hero .side .v{font-family:"IBM Plex Mono",monospace; font-size:19px; font-weight:600}
+  .busy{font-size:12px; color:var(--muted); font-family:"IBM Plex Mono",monospace; min-height:16px; margin:-6px 0 -4px 2px}
+
+  .tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(158px,1fr)); gap:10px}
+  .tile{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px 14px}
+  .tile .k{font-size:11.5px; color:var(--muted); font-weight:600; letter-spacing:.02em; margin-bottom:4px}
+  .tile .v{font-family:"IBM Plex Mono",monospace; font-size:19px; font-weight:600}
+  .tile .s{font-size:11.5px; color:var(--sub); margin-top:2px}
+  .v.pos{color:var(--good)} .v.neg{color:var(--bad)} .v.warn{color:var(--warn)}
+
+  .card{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:18px}
+  .card h3{font-family:Archivo,system-ui,sans-serif; font-size:14px; font-weight:700; margin:0 0 4px}
+  .card .sub{font-size:12.5px; color:var(--sub); margin:0 0 14px}
+
+  /* game plan */
+  .verdict{display:flex; align-items:center; gap:10px; font-family:Archivo,system-ui,sans-serif;
+           font-weight:800; font-size:17px; letter-spacing:-.01em; margin-bottom:4px}
+  .verdict .dot{width:11px; height:11px; border-radius:50%; flex:none}
+  .plan-stop .dot{background:var(--bad)} .plan-stop .verdict{color:var(--bad)}
+  .plan-wait .dot{background:var(--warn)} .plan-wait .verdict{color:var(--warn)}
+  .plan-go .dot{background:var(--good)} .plan-go .verdict{color:var(--good)}
+  .steps{list-style:none; padding:0; margin:12px 0 0}
+  .steps li{position:relative; padding:0 0 0 26px; margin-bottom:9px; font-size:13.5px; color:var(--sub)}
+  .steps li:last-child{margin-bottom:0}
+  .steps li::before{content:""; position:absolute; left:8px; top:8px; width:5px; height:5px;
+                    border-radius:50%; background:var(--muted)}
+  .steps li strong{color:var(--ink); font-weight:600}
+  .steps li code{font-family:"IBM Plex Mono",monospace; color:var(--accent); font-size:12.5px}
+
+  .budgetbar{display:flex; gap:4px; margin:2px 0 4px}
+  .budgetbar .slot{flex:1; height:30px; border-radius:6px; border:1px solid var(--border);
+    background:var(--inset); display:flex; align-items:center; justify-content:center;
+    font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--muted)}
+  .budgetbar .slot.used{background:rgba(230,103,103,.16); border-color:var(--bad); color:var(--ink)}
+  .budgetbar .slot.next{background:rgba(240,162,50,.16); border-color:var(--accent); color:var(--ink); font-weight:600}
+  .inlinefield{display:flex; align-items:center; gap:10px; margin:2px 0 12px; flex-wrap:wrap}
+  .inlinefield label{font-size:12.5px; color:var(--sub)}
+  .inlinefield input{width:130px; font-size:13px}
+  .ladderplan{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--accent);
+              font-weight:600; margin:10px 0 5px; letter-spacing:.02em}
+  .ladderplan em{color:var(--muted); font-style:normal; font-weight:400; font-family:"IBM Plex Sans",sans-serif}
+  .ladder{display:flex; gap:6px; margin:4px 0 12px; flex-wrap:wrap}
+  .rung{flex:1; min-width:64px; text-align:center; padding:9px 4px; border-radius:8px;
+        border:1px solid var(--border); background:var(--inset); font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--muted)}
+  .rung.cur{border-color:var(--accent); background:rgba(240,162,50,.12); color:var(--ink); font-weight:600}
+  .rung.ok{color:var(--sub)}
+  .rung small{display:block; font-size:10px; letter-spacing:.03em; margin-top:2px; text-transform:uppercase}
+
+  /* outcome bar */
+  .obar{display:flex; height:26px; border-radius:6px; overflow:hidden; gap:2px; background:var(--page)}
+  .obar div{min-width:2px; transition:flex-grow .35s}
+  .oleg{display:flex; gap:18px; flex-wrap:wrap; margin-top:10px; font-size:12.5px; color:var(--sub)}
+  .oleg span{display:inline-flex; align-items:center; gap:6px}
+  .oleg i{width:10px; height:10px; border-radius:3px; display:inline-block}
+  .oleg b{font-family:"IBM Plex Mono",monospace; color:var(--ink); font-weight:600}
+
+  .dist{display:grid; grid-template-columns:repeat(5,1fr); gap:8px; align-items:end; min-height:118px}
+  .dist .col{display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; justify-content:flex-end}
+  .dist .bar{width:100%; border-radius:4px 4px 2px 2px; background:var(--line); min-height:3px; transition:height .35s}
+  .dist .pc{font-family:"IBM Plex Mono",monospace; font-size:13px; font-weight:600}
+  .dist .cap{font-size:11.5px; color:var(--muted); text-align:center}
+  .dist .col.zero .bar{background:var(--seg-max)}
+
+  .chartbox{position:relative}
+  svg text{font-family:"IBM Plex Mono",monospace; font-size:11px; fill:var(--muted)}
+  .tip{position:absolute; pointer-events:none; background:var(--tip-bg); color:var(--tip-ink);
+       font-family:"IBM Plex Mono",monospace; font-size:12px; padding:6px 9px; border-radius:7px;
+       transform:translate(-50%,-130%); white-space:nowrap; display:none; z-index:3}
+
+  table{width:100%; border-collapse:collapse; font-size:13.5px}
+  th{font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600;
+     text-align:right; padding:6px 10px; border-bottom:1px solid var(--border)}
+  th:first-child, td:first-child{text-align:left}
+  td{padding:7px 10px; border-bottom:1px solid var(--hairline); text-align:right;
+     font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums}
+  td:first-child{font-family:"IBM Plex Sans",sans-serif}
+  tr:last-child td{border-bottom:none}
+  td.pos{color:var(--good)} td.neg{color:var(--bad)}
+  .recpick{border:1px solid var(--accent); background:rgba(240,162,50,.08); border-radius:10px;
+           padding:16px 18px; margin-bottom:14px}
+  .recpick.cold{border-color:var(--bad); background:rgba(230,103,103,.08)}
+  .recpick.wait{border-color:var(--warn); background:rgba(224,163,46,.08)}
+  .recname{font-family:Archivo,system-ui,sans-serif; font-weight:800; font-size:clamp(20px,3.4vw,30px);
+           letter-spacing:-.01em; color:var(--accent); line-height:1.15}
+  .recpick.cold .recname{color:var(--bad)} .recpick.wait .recname{color:var(--warn)}
+  .recstats{display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:12px; margin-top:13px}
+  .recstats .k{font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted)}
+  .recstats .v{font-family:"IBM Plex Mono",monospace; font-size:16px; font-weight:600; color:var(--ink); margin-top:2px}
+
+  /* checker */
+  .ctxbar{background:var(--inset); border:1px solid var(--border); border-left:3px solid var(--accent);
+          border-radius:8px; padding:10px 14px; font-size:12.5px; color:var(--sub)}
+  .ctxbar strong{color:var(--ink); font-family:"IBM Plex Mono",monospace; font-weight:600}
+  .paperbadge{display:inline-block; background:var(--line); color:#fff; font-family:"IBM Plex Mono",monospace;
+    font-size:10px; font-weight:600; letter-spacing:.08em; padding:2px 6px; border-radius:4px; vertical-align:1px}
+  .acctrow .pick .paperbadge{margin-left:6px}
+  .verdictBox{border-radius:10px; padding:16px 18px; border:1px solid var(--border); background:var(--inset); margin-bottom:14px}
+  .verdictBox.clear{border-color:var(--good); background:rgba(34,180,85,.10)}
+  .verdictBox.caution{border-color:var(--warn); background:rgba(224,163,46,.10)}
+  .verdictBox.block{border-color:var(--bad); background:rgba(230,103,103,.10)}
+  .verdictBox .vtitle{font-family:Archivo,system-ui,sans-serif; font-weight:800; font-size:20px; letter-spacing:-.01em}
+  .verdictBox.clear .vtitle{color:var(--good)}
+  .verdictBox.caution .vtitle{color:var(--warn)}
+  .verdictBox.block .vtitle{color:var(--bad)}
+  .verdictBox .vsub{font-size:13px; color:var(--sub); margin-top:3px}
+  .checks{list-style:none; padding:0; margin:0}
+  .checks li{display:flex; gap:10px; align-items:flex-start; padding:9px 0; border-bottom:1px solid var(--hairline); font-size:13.5px}
+  .checks li:last-child{border-bottom:none}
+  .checks .mark{font-family:"IBM Plex Mono",monospace; font-weight:600; flex:none; width:18px; text-align:center}
+  .checks .ok .mark{color:var(--good)} .checks .warn .mark{color:var(--warn)} .checks .fail .mark{color:var(--bad)}
+  .checks .body{flex:1; min-width:0}
+  .checks .body b{font-weight:600; display:block}
+  .checks .body span{color:var(--muted); font-size:12.5px; font-family:"IBM Plex Mono",monospace}
+
+  /* journal */
+  .jstats{display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin-bottom:16px}
+  .btn{background:var(--accent); color:var(--accent-ink); border:none; border-radius:7px; font:inherit;
+       font-weight:600; font-size:13px; padding:8px 16px; cursor:pointer}
+  .btn:hover{filter:brightness(1.08)}
+  .btn.ghost{background:var(--raised); border:1px solid rgba(255,255,255,.16); color:var(--ink); font-weight:600}
+  .btn.ghost:hover{border-color:var(--muted); background:#232d36}
+  /* outcome buttons carry their own meaning — green closes a winner, red closes a loser */
+  .btn.win{background:rgba(34,180,85,.16); border-color:rgba(34,180,85,.55); color:#5fd98a}
+  .btn.win:hover{background:rgba(34,180,85,.28); border-color:var(--good); color:#7ce3a1}
+  .btn.loss{background:rgba(230,103,103,.16); border-color:rgba(230,103,103,.55); color:#f08a8a}
+  .btn.loss:hover{background:rgba(230,103,103,.28); border-color:var(--bad); color:#f7a3a3}
+  .btn.manual{background:rgba(240,162,50,.14); border-color:rgba(240,162,50,.5); color:var(--accent)}
+  .btn.manual:hover{background:rgba(240,162,50,.24); border-color:var(--accent)}
+  .btn.ghost[data-armed]{background:rgba(230,103,103,.22); border-color:var(--bad); color:#f7a3a3}
+  .btnrow{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+  .del{background:none; border:1px solid transparent; border-radius:6px; color:var(--sub); cursor:pointer;
+       font-size:15px; padding:1px 7px; line-height:1.2}
+  .del:hover{color:#f7a3a3; background:rgba(230,103,103,.16); border-color:rgba(230,103,103,.45)}
+
+  /* long / short read at a glance */
+  .dir{font-family:"IBM Plex Mono",monospace; font-weight:700; letter-spacing:.05em}
+  .dir.long{color:var(--good)} .dir.short{color:var(--bad)}
+  td.dir{font-size:12px}
+
+  /* one account's trades never blend into another's */
+  .jbar{display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--surface);
+        border:1px solid var(--border); border-radius:10px; padding:11px 16px}
+  .jbar select{width:auto; min-width:210px; flex:none}
+  .jbar .lbl{font-size:11.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); font-weight:600}
+  .ghead td{background:var(--inset); font-family:"IBM Plex Sans",sans-serif; font-weight:600; font-size:11.5px;
+            color:var(--sub); text-transform:uppercase; letter-spacing:.07em; text-align:left;
+            padding:9px 10px; border-bottom:1px solid var(--border); border-top:1px solid var(--border)}
+  .ghead.cur td{color:var(--accent); box-shadow:inset 2px 0 0 var(--accent)}
+  .gsub{font-weight:400; text-transform:none; letter-spacing:0; color:var(--muted);
+        font-family:"IBM Plex Mono",monospace; margin-left:9px}
+  .ogroup + .ogroup{margin-top:14px; border-top:1px solid var(--border)}
+  .ohead{font-size:11.5px; font-weight:600; color:var(--sub); text-transform:uppercase; letter-spacing:.07em;
+         padding:11px 0 3px}
+  .ohead.cur{color:var(--accent)}
+
+  /* live position tracking */
+  .live{border:1px solid var(--border); border-radius:9px; padding:12px 14px; margin-bottom:10px; background:var(--inset)}
+  .live:last-child{margin-bottom:0}
+  .live.hitTgt{border-color:var(--good); background:rgba(34,180,85,.08)}
+  .live.hitStop{border-color:var(--bad); background:rgba(230,103,103,.08)}
+  .live .lhead{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:9px}
+  .live .lhead b{font-size:14px}
+  .lacct{font-size:11.5px; color:var(--muted); font-family:"IBM Plex Mono",monospace}
+  .lflag{margin-left:auto; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--muted)}
+  .live.hitTgt .lflag{color:var(--good)} .live.hitStop .lflag{color:var(--bad)}
+  .lgrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(108px,1fr)); gap:11px; align-items:end}
+  .lgrid .lk{font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.07em; display:block; margin-bottom:3px}
+  .lgrid .lv{font-family:"IBM Plex Mono",monospace; font-size:15px; font-weight:600}
+  .lgrid .lv.pos{color:var(--good)} .lgrid .lv.neg{color:var(--bad)}
+  .ltrack{position:relative; height:8px; border-radius:4px; background:var(--raised); margin:18px 0 26px}
+  .ltrack .fill{position:absolute; top:0; bottom:0; left:0; border-radius:4px; background:var(--line); opacity:.75}
+  .ltrack .mk{position:absolute; top:-4px; width:2px; height:16px; background:var(--muted); transform:translateX(-1px)}
+  .ltrack .mk.now{background:var(--accent); width:3px; height:20px; top:-6px}
+  .ltrack .cap{position:absolute; top:15px; font-size:11px; font-weight:600; color:var(--muted);
+               font-family:"IBM Plex Mono",monospace; white-space:nowrap; max-width:48%; overflow:hidden}
+  .ltrack .cap.l{left:0; transform:none; color:var(--bad)}
+  .ltrack .cap.r{left:auto; right:0; transform:none; color:var(--good)}
+  .lfoot{font-size:11.5px; color:var(--muted); font-family:"IBM Plex Mono",monospace; margin:0 0 10px}
+
+  /* OKX feed */
+  .feedbar{display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-family:"IBM Plex Mono",monospace;
+           font-size:12px; color:var(--sub); background:var(--inset); border:1px solid var(--border);
+           border-radius:8px; padding:8px 12px; margin-bottom:12px}
+  .feedbar .fdot{width:8px; height:8px; border-radius:50%; background:var(--muted); flex:none}
+  .feedbar.on .fdot{background:var(--good); box-shadow:0 0 0 3px rgba(34,180,85,.18); animation:fpulse 2s ease-in-out infinite}
+  .feedbar.off .fdot{background:var(--warn)}
+  .feedbar b{color:var(--ink); font-weight:600}
+  .feedbar .fsrc{color:var(--muted)}
+  .feedbar .fage{margin-left:auto; color:var(--muted); font-size:11px}
+  .feedbar button{background:none; border:1px solid var(--border); color:var(--sub); border-radius:6px;
+                  font:inherit; font-size:11px; padding:3px 9px; cursor:pointer}
+  .feedbar button:hover{color:var(--ink); border-color:var(--muted)}
+  @keyframes fpulse{0%,100%{opacity:1} 50%{opacity:.45}}
+  @media (prefers-reduced-motion: reduce){ .feedbar.on .fdot{animation:none} }
+  .lchip{font-size:10px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; padding:2px 6px;
+         border-radius:4px; vertical-align:2px; margin-left:6px}
+  /* not .live — that class belongs to the position row and would style the chip as a box */
+  .lchip.okx{background:rgba(34,180,85,.18); color:#5fd98a}
+  .lchip.stale{background:rgba(224,163,46,.18); color:var(--warn)}
+  .lmini{background:none; border:1px solid var(--border); color:var(--muted); border-radius:5px; font:inherit;
+         font-size:10.5px; padding:2px 7px; cursor:pointer; margin-top:6px; display:block}
+  .lmini:hover{color:var(--ink); border-color:var(--muted)}
+  .gapline{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--muted);
+           background:var(--inset); border:1px solid var(--border); border-radius:8px;
+           padding:9px 13px; margin:-4px 0 0; line-height:1.6}
+  .gapline b{color:var(--ink); font-weight:600}
+  .gapline .g-slip{color:var(--warn)} .gapline .g-fee{color:var(--sub)}
+  .lgrid .lv[data-live]{color:var(--ink)}
+  .lchip.pin{background:rgba(240,162,50,.18); color:var(--accent); cursor:pointer; border:none; font-family:inherit}
+  .lalert{display:flex; align-items:center; gap:10px; flex-wrap:wrap; border-radius:8px; padding:9px 12px;
+          margin:10px 0 0; font-size:12.5px; font-weight:600}
+  .lalert.tgt{background:rgba(34,180,85,.16); border:1px solid var(--good); color:#7ce3a1}
+  .lalert.stp{background:rgba(230,103,103,.16); border:1px solid var(--bad); color:#f7a3a3}
+  .lalert .btn{padding:4px 11px; font-size:12px; margin-left:auto}
+
+
+  /* settlement - verify the real fill before it enters the record */
+  .settle{border:1px solid var(--accent); border-radius:9px; background:rgba(240,162,50,.07); padding:14px 15px; margin-top:11px}
+  .settle h4{font-family:Archivo,system-ui,sans-serif; font-size:13px; margin:0 0 3px}
+  .settle .shint{font-size:12px; color:var(--sub); margin:0 0 11px}
+  .sfields{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:11px; margin-bottom:12px}
+  .sfields .field{margin-bottom:0}
+  .settle .srow{display:flex; justify-content:space-between; gap:14px; font-family:"IBM Plex Mono",monospace;
+                font-size:12.5px; padding:5px 0; border-bottom:1px solid var(--hairline)}
+  .settle .srow span:first-child{font-family:"IBM Plex Sans",sans-serif; color:var(--sub)}
+  .settle .srow.tot{border-top:1px solid var(--border); border-bottom:none; margin-top:5px; padding-top:9px;
+                    font-weight:700; font-size:14.5px}
+  .settle .srow.note{border-bottom:none; color:var(--muted); font-size:11.5px; display:block; padding-top:9px; line-height:1.45}
+  .settle .pos{color:var(--good)} .settle .neg{color:var(--bad)}
+  #jrnTable td{padding:6px 8px} #jrnTable th{padding:6px 8px}
+  .openrow{display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;
+           padding:14px 0; border-bottom:1px solid var(--hairline)}
+  .openrow:last-child{border-bottom:none}
+  .oinfo b{display:block; font-size:16px; margin-bottom:3px}
+  /* an open position is live money — it reads at full strength, not as secondary detail */
+  .oinfo span{font-size:13.5px; color:var(--ink); font-family:"IBM Plex Mono",monospace; line-height:1.5}
+  .openrow .btn{padding:5px 11px; font-size:12px}
+  .acctrow{display:flex; align-items:center; gap:6px; margin-bottom:6px}
+  .acctrow .pick{flex:1; text-align:left; background:var(--inset); border:1px solid var(--border);
+    border-radius:8px; padding:8px 10px; cursor:pointer; color:var(--sub); font:inherit}
+  .acctrow .pick:hover{border-color:var(--muted); color:var(--ink)}
+  .acctrow.cur .pick{border-color:var(--accent); background:rgba(240,162,50,.12); color:var(--ink)}
+  .acctrow .pick b{display:block; font-size:13px; font-weight:600}
+  .acctrow .pick span{font-size:11.5px; color:var(--muted); font-family:"IBM Plex Mono",monospace}
+  .empty{color:var(--muted); font-size:13px; text-align:center; padding:26px 0}
+
+  footer{margin-top:26px; font-size:12.5px; color:var(--muted); max-width:78ch}
+  footer p{margin:4px 0}
+  @media (prefers-reduced-motion: reduce){ .obar div, .dist .bar, .toggle input, .toggle input::after{transition:none} }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <h1>Breakout Eval Edge</h1>
+    <button id="resetBtn" type="button">Reset to defaults</button>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" id="tab-dash" aria-selected="true" aria-controls="view-dash">Dashboard</button>
+    <button role="tab" id="tab-check" aria-selected="false" aria-controls="view-check">Pre-Trade Check</button>
+    <button role="tab" id="tab-jrn" aria-selected="false" aria-controls="view-jrn">Journal<span class="badge" id="jrnCount"></span></button>
+  </div>
+
+  <!-- ================= DASHBOARD ================= -->
+  <div id="view-dash" role="tabpanel" aria-labelledby="tab-dash">
+  <div class="cols">
+    <div class="rail">
+      <div class="panel">
+        <h2>Your trading
+          <label class="toggle" title="Fill these from your logged trades"><input type="checkbox" id="useTracked">Use journal</label>
+        </h2>
+        <div class="field">
+          <label><span class="lbl">Per-trade win rate</span><span class="val" id="winRateVal">45.0%</span></label>
+          <div class="duo"><input type="range" id="winRate" min="5" max="95" step="0.1" value="45" aria-label="Per-trade win rate percent"><input type="number" id="winRateN" min="5" max="95" step="0.1" value="45"></div>
+        </div>
+        <div class="field">
+          <label><span class="lbl">Reward : risk (R)</span><span class="val" id="rrVal">2.0R</span></label>
+          <div class="duo"><input type="range" id="rr" min="0.2" max="10" step="0.1" value="2" aria-label="Reward to risk ratio"><input type="number" id="rrN" min="0.2" max="10" step="0.1" value="2"></div>
+        </div>
+        <div class="field">
+          <label><span class="lbl">Risk per trade</span><span class="val" id="riskVal">1.0%</span></label>
+          <div class="duo"><input type="range" id="risk" min="0.1" max="10" step="0.1" value="1" aria-label="Risk per trade percent of account"><input type="number" id="riskN" min="0.1" max="10" step="0.1" value="1"></div>
+          <label class="toggle" style="margin-top:6px"><input type="checkbox" id="autoRisk" checked>Set it from the account rules</label>
+          <div class="hint" id="autoRiskHint">—</div>
+        </div>
+        <div class="field">
+          <label><span class="lbl">Trades per week</span></label>
+          <input type="number" id="tpw" min="1" max="500" step="1" value="3">
+          <div class="hint" id="trackedHint">Spread across 7 days — crypto trades all week.</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Breakout eval</h2>
+        <div class="grid2">
+          <div class="field">
+            <label><span class="lbl">Plan</span></label>
+            <select id="plan">
+              <option value="classic" selected>Classic</option>
+              <option value="pro">Pro</option>
+              <option value="turbo">Turbo</option>
+              <option value="paper">Paper trading</option>
+            </select>
+          </div>
+          <div class="field">
+            <label><span class="lbl">Account</span></label>
+            <select id="acct">
+              <option value="5000">$5,000</option>
+              <option value="10000">$10,000</option>
+              <option value="25000" selected>$25,000</option>
+              <option value="50000">$50,000</option>
+              <option value="100000">$100,000</option>
+              <option value="200000">$200,000</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="field">
+            <label><span class="lbl">Profit target %</span></label>
+            <input type="number" id="target" min="1" max="50" step="0.5" value="10">
+          </div>
+          <div class="field">
+            <label><span class="lbl">Eval cost $</span></label>
+            <input type="number" id="cost" min="1" step="1" value="215">
+          </div>
+          <div class="field">
+            <label><span class="lbl">Max drawdown %</span></label>
+            <input type="number" id="maxdd" min="0.5" max="50" step="0.5" value="6">
+          </div>
+          <div class="field">
+            <label><span class="lbl">Daily loss %</span></label>
+            <input type="number" id="dailydd" min="0.5" max="50" step="0.5" value="3">
+          </div>
+        </div>
+        <div class="hint">Target and drawdowns follow the plan. Pick <strong>Paper trading</strong> to rehearse with no fee — same commissions, financing and drawdown rules, no money at risk — and edit the limits to mirror whichever plan you're aiming at. Classic tops out at $100K.</div>
+      </div>
+
+      <div class="panel">
+        <h2>Funded &amp; payouts</h2>
+        <div class="field">
+          <label><span class="lbl">Profit split</span></label>
+          <select id="split">
+            <option value="80" selected>80 / 20 (standard)</option>
+            <option value="90">90 / 10 (paid upgrade)</option>
+          </select>
+        </div>
+        <div class="grid2">
+          <div class="field">
+            <label><span class="lbl">Withdraw</span></label>
+            <select id="payoutMode">
+              <option value="pct" selected>at +X% profit</option>
+              <option value="win">after every trade win</option>
+            </select>
+          </div>
+          <div class="field" id="trigField">
+            <label><span class="lbl">X %</span></label>
+            <input type="number" id="payoutTrig" min="0.5" max="50" step="0.5" value="5">
+          </div>
+        </div>
+        <div class="field">
+          <label><span class="lbl">Funded horizon (months)</span></label>
+          <input type="number" id="horizon" min="1" max="120" step="1" value="12">
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>My accounts</h2>
+        <div id="acctList"></div>
+        <div class="btnrow" style="margin-top:10px">
+          <button class="btn" id="acctAdd" type="button">Open this account</button>
+        </div>
+        <div class="hint">Adds an account matching the Plan and Account size above. The Pre-Trade Check works off whichever one you pick here.</div>
+      </div>
+
+    </div>
+
+    <div class="results">
+      <div class="hero">
+        <div>
+          <div class="k" id="evLabel">Expected profit per eval purchased</div>
+          <div class="ev" id="evPerEval">—</div>
+        </div>
+        <div class="side">
+          <div><div class="k">Return on fee</div><div class="v" id="roi">—</div></div>
+          <div><div class="k">Eval pass rate</div><div class="v" id="passRate">—</div></div>
+          <div><div class="k">Per-trade edge</div><div class="v" id="edgeR">—</div></div>
+        </div>
+      </div>
+      <div class="busy" id="busy"></div>
+
+      <div class="card" id="dLiveCard" hidden>
+        <h3>Live positions<span class="badge" id="dLiveCount"></span></h3>
+        <p class="sub">Type the price now and every open trade is marked to it — P/L, R, and how far it has
+          travelled between your stop and target. Reach either level and it asks you to settle with the actual
+          fill, then prices the commissions, financing and slippage from that instead of assuming a clean fill.</p>
+        <div class="feedbar" id="feedBar"></div>
+        <div id="dLive"></div>
+      </div>
+
+      <div class="card" id="planCard">
+        <div class="verdict"><span class="dot"></span><span id="planVerdict">—</span></div>
+        <p class="sub" id="planHeadline" style="margin:0"></p>
+        <ul class="steps" id="planSteps"></ul>
+      </div>
+
+      <div class="card">
+        <h3>Stake ladder</h3>
+        <div class="inlinefield">
+          <label for="bankroll">Money set aside for eval fees</label>
+          <input type="number" id="bankroll" min="0" step="50" value="1000">
+        </div>
+        <p class="sub" id="ladderSub">—</p>
+        <div class="ladderplan" id="ladderPlan"></div>
+        <div class="ladder" id="ladder"></div>
+        <ul class="steps" id="ladderSteps"></ul>
+      </div>
+
+      <div class="tiles">
+        <div class="tile"><div class="k">Risk of ruin per eval</div><div class="v" id="ruin">—</div><div class="s" id="ruinFunded">—</div></div>
+        <div class="tile"><div class="k">Attempts per funded acct</div><div class="v" id="attempts">—</div><div class="s" id="attemptsCost">—</div></div>
+        <div class="tile"><div class="k">Avg payout per funded acct</div><div class="v" id="avgPayout">—</div><div class="s" id="avgCycles">—</div></div>
+        <div class="tile"><div class="k">Chance one eval beats its cost</div><div class="v" id="beatCost">—</div><div class="s">fee recovered &amp; profit</div></div>
+        <div class="tile"><div class="k">Avg trades to resolve eval</div><div class="v" id="avgTrades">—</div><div class="s" id="avgDays">—</div></div>
+      </div>
+
+      <div class="card">
+        <h3>Where your evals end up</h3>
+        <p class="sub">Share of simulated eval attempts by outcome.</p>
+        <div class="obar" id="obar" role="img" aria-label="Eval outcome breakdown"></div>
+        <div class="oleg" id="oleg"></div>
+      </div>
+
+      <div class="card">
+        <h3>Payouts per funded account</h3>
+        <p class="sub" id="payoutSub">—</p>
+        <div class="dist" id="dist"></div>
+      </div>
+
+      <div class="card chartbox">
+        <h3>Expectancy vs. win rate</h3>
+        <p class="sub">Expected $ per eval as your per-trade win rate moves, holding everything else fixed. The dot is you.</p>
+        <div style="overflow-x:auto"><svg id="chart" width="100%" height="260" viewBox="0 0 760 260" preserveAspectRatio="none" aria-label="Line chart of expected profit per eval versus win rate"></svg></div>
+        <div class="tip" id="tip"></div>
+      </div>
+
+      <div class="card">
+        <h3>Buy this one</h3>
+        <p class="sub" id="recSub">—</p>
+        <div class="recpick" id="recPick">
+          <div class="recname" id="recName">—</div>
+          <div class="recstats" id="recStats"></div>
+        </div>
+        <ul class="steps" id="recWhy"></ul>
+      </div>
+
+      <div class="card">
+        <h3>Spend &amp; expected P/L over the next year</h3>
+        <p class="sub" id="planLine">—</p>
+        <div style="overflow-x:auto"><table id="projTable">
+          <thead><tr><th>Horizon</th><th>Evals bought</th><th>Fees spent</th><th>Expected payouts</th><th>Expected net</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+
+      <footer>
+        <p><strong>Method.</strong> 4,000 simulated eval attempts per recalc (fixed seed, so results are stable); every passing sim continues onto a funded account until it busts or the funded horizon runs out, with any remaining profit withdrawn at the end. Wins pay +R × risk, losses −1 × risk, drawn independently — real losing streaks cluster harder than that, so treat these as an optimistic ceiling. Your weekly trade count is spread across all 7 days; daily loss is checked against each day's starting balance, and max drawdown is a static floor from the initial balance.</p>
+        <p><strong>Defaults</strong> mirror Breakout's published 1-step plans (Classic 10% target / 6% static DD, Pro 12%/5%, Turbo 9%/3%, all 3% daily loss, no time limit). Fees taken from breakoutprop.com/pricing on 30 Aug 2026 for both splits; Classic tops out at $100K. Verify pricing before buying. Your inputs and journal are saved in this browser only. Not financial advice.</p>
+      </footer>
+    </div>
+  </div>
+  </div>
+
+  <!-- ================= PRE-TRADE CHECK ================= -->
+  <div id="view-check" role="tabpanel" aria-labelledby="tab-check" hidden>
+  <div class="cols">
+    <div class="rail">
+      <div class="panel">
+        <h2>Sizing strategy</h2>
+        <div class="field">
+          <label><span class="lbl">Strategy</span></label>
+          <select id="cStrat">
+            <option value="budget" selected>Daily budget — can't breach</option>
+            <option value="flat">Flat % of balance</option>
+            <option value="manual">I'll set the risk myself</option>
+          </select>
+        </div>
+        <div id="cBudgetFields">
+          <div class="grid2">
+            <div class="field">
+              <label><span class="lbl">Trades / day</span></label>
+              <input type="number" id="cMaxTrades" min="1" max="10" step="1" value="2">
+            </div>
+            <div class="field">
+              <label><span class="lbl">Use % of daily limit</span></label>
+              <input type="number" id="cUsePct" min="10" max="100" step="1" value="85">
+            </div>
+          </div>
+          <div class="budgetbar" id="cBudgetBar"></div>
+        </div>
+        <div class="field" id="cFlatField" hidden>
+          <label><span class="lbl">Risk per trade %</span></label>
+          <input type="number" id="cFlatPct" min="0.05" max="10" step="0.05" value="1">
+        </div>
+        <div class="field" id="cManualField" hidden>
+          <label><span class="lbl">Risk on this trade $</span></label>
+          <input type="number" id="cRisk" min="0" step="1" value="250">
+        </div>
+        <div class="hint" id="cStratHint"></div>
+      </div>
+
+      <div class="panel">
+        <h2>The trade</h2>
+        <div class="field">
+          <label><span class="lbl">Symbol</span></label>
+          <select id="cSym"></select>
+        </div>
+        <div class="grid3">
+          <div class="field"><label><span class="lbl">Entry</span></label><input type="number" id="cEntry" step="any" value="100000"></div>
+          <div class="field"><label><span class="lbl">Stop</span></label><input type="number" id="cStop" step="any" value="98500"></div>
+          <div class="field"><label><span class="lbl">Target</span></label><input type="number" id="cTarget" step="any" value="103500"></div>
+        </div>
+        <div class="grid2">
+          <div class="field">
+            <label><span class="lbl">Timeframe</span></label>
+            <select id="cTF">
+              <option value="15">15 minute</option>
+              <option value="60" selected>1 hour</option>
+              <option value="240">4 hour</option>
+              <option value="1440">Daily</option>
+            </select>
+          </div>
+          <div class="field">
+            <label><span class="lbl">Max hold (hours)</span></label>
+            <input type="number" id="cHold" min="0" max="720" step="1" value="24">
+          </div>
+        </div>
+        <div class="field">
+          <label><span class="lbl">Platform</span></label>
+          <select id="cPlat">
+            <option value="bo" selected>Breakout Terminal</option>
+            <option value="dx">DXtrade</option>
+          </select>
+        </div>
+        <div class="hint" id="cFinHint">—</div>
+        <div class="field" style="margin-top:12px">
+          <label><span class="lbl">Market conditions</span></label>
+          <select id="cCond">
+            <option value="normal">Normal book</option>
+            <option value="volatile" selected>Volatile / fast move</option>
+            <option value="extreme">News or liquidation cascade</option>
+          </select>
+          <div class="hint" id="cSlipHint">—</div>
+        </div>
+        <div class="hint">Max hold is a commitment, not a guess: the position is sized to afford financing for that long, so a shorter trade simply costs less. Overstay it and your real risk creeps past budget.</div>
+      </div>
+
+      <div class="panel">
+        <h2>Account state</h2>
+        <div class="field">
+          <label><span class="lbl">Trading account</span></label>
+          <select id="cAcctSel"></select>
+          <div class="hint" id="cAcctHint">Open accounts on the Dashboard to list them here.</div>
+        </div>
+        <div class="field">
+          <label><span class="lbl">Balance at 00:30 UTC $</span></label>
+          <input type="number" id="cDayStart" min="0" step="1" value="25000">
+          <div class="hint">The daily equity limit is locked to this for the next 24h.</div>
+        </div>
+        <div class="field">
+          <label><span class="lbl">Realized P/L today $</span></label>
+          <input type="number" id="cToday" step="1" value="0">
+          <div class="hint" id="cTodayHint">Negative if you're down. Journal fills this automatically.</div>
+        </div>
+        <div class="field">
+          <label><span class="lbl">Floating P/L on open trades $</span></label>
+          <input type="number" id="cFloat" step="1" value="0">
+          <div class="hint">Breakout counts open positions — equity, not balance.</div>
+        </div>
+        <div class="field">
+          <label><span class="lbl">Open risk right now $</span></label>
+          <input type="number" id="cOpen" min="0" step="1" value="0">
+          <div class="hint" id="cOpenHint">What you'd lose if every open position hit its stop.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="results">
+      <div class="ctxbar" id="cContext">—</div>
+      <div class="hero" id="cHero">
+        <div>
+          <div class="k">Position size to enter</div>
+          <div class="ev" id="cSize">—</div>
+          <div class="s" id="cSizeSub" style="font-size:12.5px; color:var(--sub); margin-top:4px">—</div>
+        </div>
+        <div class="side">
+          <div><div class="k">Max loss</div><div class="v" id="cRiskOut">—</div><div class="s" id="cRiskSub" style="font-size:11px;color:var(--muted);font-family:'IBM Plex Mono',monospace">—</div></div>
+          <div><div class="k">Reward</div><div class="v" id="cNetR">—</div><div class="s" id="cNetRSub" style="font-size:11px;color:var(--muted);font-family:'IBM Plex Mono',monospace">—</div></div>
+          <div><div class="k">Notional</div><div class="v" id="cNotional">—</div></div>
+        </div>
+      </div>
+
+      <div class="gapline" id="cGap" hidden></div>
+
+      <div class="verdictBox" id="cVerdict">
+        <div class="vtitle" id="cVerdictTitle">—</div>
+        <div class="vsub" id="cVerdictSub"></div>
+      </div>
+
+      <div class="btnrow" style="margin:-4px 0 0">
+        <button class="btn" id="cLog" type="button">Log this trade to journal</button>
+        <span class="hint" id="cLogMsg" style="margin:0"></span>
+      </div>
+
+      <div class="tiles">
+        <div class="tile"><div class="k">Daily room left</div><div class="v" id="cDailyLeft">—</div><div class="s" id="cDailyLeftSub">—</div></div>
+        <div class="tile"><div class="k">Max DD room left</div><div class="v" id="cDDLeft">—</div><div class="s" id="cDDLeftSub">—</div></div>
+        <div class="tile"><div class="k">Reward : risk</div><div class="v" id="cRR">—</div><div class="s" id="cRRSub">—</div></div>
+        <div class="tile"><div class="k">Total cost</div><div class="v" id="cFees">—</div><div class="s" id="cFeesSub">—</div></div>
+      </div>
+
+      <div class="card" id="cBufferCard">
+        <h3>Why this can't breach your daily limit</h3>
+        <p class="sub" id="cBufferSub">—</p>
+        <div style="overflow-x:auto"><table id="cBuffer">
+          <thead><tr><th>If you keep losing</th><th>Risk that trade</th><th>Equity after</th><th>Room left</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div class="hint" id="cBufferNote"></div>
+      </div>
+
+      <div class="card">
+        <h3>Rule checks</h3>
+        <p class="sub">Against Breakout's live rules for your plan, symbol limits, and your own trading stats.</p>
+        <ul class="checks" id="cChecks"></ul>
+      </div>
+
+      <div class="card">
+        <h3>Cost breakdown</h3>
+        <p class="sub" id="cCostSub">Breakout charges 0.04% commission per side and 0.033% per day financing on notional.</p>
+        <div style="overflow-x:auto"><table id="cCosts">
+          <thead><tr><th>Item</th><th>Rate</th><th>Cost</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <h3>What this trade does to your day</h3>
+        <p class="sub">Equity path if this trade — and your open positions — go against you.</p>
+        <div style="overflow-x:auto"><table id="cScenario">
+          <thead><tr><th>Scenario</th><th>Day P/L</th><th>Equity</th><th>Daily limit</th><th>Max DD</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <!-- ================= JOURNAL ================= -->
+  <div id="view-jrn" role="tabpanel" aria-labelledby="tab-jrn" hidden>
+    <div class="results">
+      <div class="jbar">
+        <span class="lbl">Showing</span>
+        <select id="jFilter"><option value="all">All accounts</option></select>
+        <span class="hint" id="jFilterHint" style="margin:0"></span>
+      </div>
+
+      <div class="card" id="jOpenCard" hidden>
+        <h3>Open positions</h3>
+        <p class="sub">Logged from the Pre-Trade Check. Close them out here and your stats update. "Hit target" uses the net R the checker calculated after fees.</p>
+        <div id="jOpen"></div>
+      </div>
+
+      <div class="card">
+        <h3>Add a past trade</h3>
+        <p class="sub">Trades taken through the Pre-Trade Check arrive here filled in automatically — use this form only to backfill history or log something you sized elsewhere.</p>
+        <div class="btnrow" style="margin-bottom:14px">
+          <button class="btn ghost" id="jManualToggle" type="button">Enter one manually</button>
+        </div>
+        <div id="jManualForm" hidden>
+        <div class="grid3" style="margin-bottom:10px">
+          <div class="field"><label><span class="lbl">Date</span></label><input type="date" id="jDate"></div>
+          <div class="field"><label><span class="lbl">Symbol</span></label><input type="text" id="jSym" placeholder="BTC" maxlength="12"></div>
+          <div class="field"><label><span class="lbl">Direction</span></label><select id="jDir"><option value="long">Long</option><option value="short">Short</option></select></div>
+        </div>
+        <div class="grid3" style="margin-bottom:10px">
+          <div class="field"><label><span class="lbl">Risked $</span></label><input type="number" id="jRisk" min="0" step="1" placeholder="250"></div>
+          <div class="field"><label><span class="lbl">P/L $</span></label><input type="number" id="jPL" step="1" placeholder="500 or -250"></div>
+          <div class="field"><label><span class="lbl">Account size $</span></label><input type="number" id="jAcct" min="0" step="1" placeholder="25000"></div>
+        </div>
+        <div class="field" style="margin-bottom:10px"><label><span class="lbl">Belongs to</span></label>
+          <select id="jAcctSel"><option value="none">No account (Dashboard settings)</option></select>
+          <span class="hint">Each account has its own daily limit and drawdown, so its trades are counted on their own.</span>
+        </div>
+        <div class="field" style="margin-bottom:12px"><label><span class="lbl">Notes</span></label><textarea id="jNote" rows="2" placeholder="Setup, mistake, what you'd do differently"></textarea></div>
+        <div class="btnrow">
+          <button class="btn" id="jAdd" type="button">Add trade</button>
+          <span class="hint" id="jAddMsg" style="margin:0"></span>
+        </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Your numbers</h3>
+        <p class="sub" id="jStatsSub">—</p>
+        <div class="jstats" id="jStats"></div>
+        <div class="chartbox">
+          <div style="overflow-x:auto"><svg id="eqChart" width="100%" height="180" viewBox="0 0 760 180" preserveAspectRatio="none" aria-label="Cumulative R equity curve"></svg></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Trades<span class="badge" id="jrnCount2"></span></h3>
+        <p class="sub">Newest first. Data lives in this browser — export to keep a backup.</p>
+        <div style="overflow-x:auto"><table id="jrnTable">
+          <thead><tr><th>Date</th><th>Symbol</th><th>Dir</th><th>Risked</th><th>Fees</th><th>P/L</th><th>R</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div class="empty" id="jrnEmpty">No trades logged yet.</div>
+        <div class="btnrow" style="margin-top:14px">
+          <button class="btn ghost" id="jExport" type="button">Export JSON</button>
+          <button class="btn ghost" id="jImport" type="button">Import JSON</button>
+          <button class="btn ghost" id="jClear" type="button">Clear all</button>
+        </div>
+        <div id="jIoBox" hidden style="margin-top:12px">
+          <textarea id="jIo" rows="6" placeholder="Paste exported JSON here, then press Load"></textarea>
+          <div class="btnrow" style="margin-top:8px">
+            <button class="btn" id="jIoLoad" type="button">Load</button>
+            <button class="btn ghost" id="jIoClose" type="button">Close</button>
+            <span class="hint" id="jIoMsg" style="margin:0"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  const $ = id => document.getElementById(id);
+
+  const PLANS = { classic:{target:10,maxdd:6,dailydd:3}, pro:{target:12,maxdd:5,dailydd:3}, turbo:{target:9,maxdd:3,dailydd:3},
+    // Paper mirrors a real rule set so sizing, fees and drawdown behave identically —
+    // the only difference is that no fee is paid. Its rules stay editable to match
+    // whichever plan you're rehearsing for.
+    paper:{target:10,maxdd:6,dailydd:3} };
+  const isPaper = k => k==='paper';
+  // live fees from breakoutprop.com/pricing (2026-08-30): [80/20 split, 90/10 split]
+  const FEES = {
+    classic:{5000:[45,54], 10000:[85,102], 25000:[215,258], 50000:[400,480], 100000:[800,960]},
+    pro:    {5000:[33,39], 10000:[65,78],  25000:[150,180], 50000:[280,336], 100000:[545,654], 200000:[1090,1308]},
+    turbo:  {5000:[20,24], 10000:[40,48],  25000:[95,114],  50000:[180,216], 100000:[330,396], 200000:[660,792]}
+  };
+  const SIZES = [5000,10000,25000,50000,100000,200000];
+  const PLAN_KEYS = ['classic','pro','turbo'];
+  const DEFAULTS = { winRate:'45', rr:'2', risk:'1', tpw:'3', plan:'classic', acct:'25000',
+    target:'10', cost:'215', maxdd:'6', dailydd:'3', split:'80', payoutMode:'pct',
+    payoutTrig:'5', horizon:'12', bankroll:'1000' };
+  const STORE_KEY='breakout-eval-edge-v5';
+  const JRN_KEY='breakout-eval-journal-v1';
+
+  // Breakout costs, from breakoutprop.com/symbols (checked 31 Aug 2026):
+  //  · commission 0.04% of notional, charged per side
+  //  · financing 3.3 bps (0.033%) per day on notional.
+  //    Breakout Terminal deducts it every 4 hours (so 1/6 of the daily rate per block).
+  //    DXtrade records open positions at 0000 UTC and deducts once at 0025 UTC.
+  // Expected stop slippage in basis points OF PRICE, by symbol liquidity and market state.
+  // Breakout publishes spreads as "variable based on centralized exchange liquidity" and no
+  // slippage figures, so these are working estimates for crypto stop-market fills — deliberately
+  // conservative. What matters for sizing is this move measured against YOUR stop distance,
+  // which is why a tight stop is punished far harder than a wide one.
+  const SLIP_BPS = {
+    BTCUSD:{normal:5, volatile:25, extreme:100},    // 0.05% / 0.25% / 1.00% of price
+    ETHUSD:{normal:8, volatile:35, extreme:150}     // 0.08% / 0.35% / 1.50% of price
+  };
+  const DEFAULT_SLIP = {normal:10, volatile:50, extreme:200};
+  const slipTable = sym => SLIP_BPS[sym] || DEFAULT_SLIP;
+  const COMMISSION = 0.0004;
+  const FIN_DAILY  = 0.00033;
+  const FIN_BLOCK  = FIN_DAILY/6;   // per 4-hour block on Breakout Terminal
+  // symbol: [max notional USD, leverage] — Breakout's published caps.
+  // Trimmed to what's actually traded; add rows here to bring more instruments back.
+  const SYMBOLS = {
+    BTCUSD:[1000000,10],
+    ETHUSD:[1000000,5]
+  };
+
+  function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+
+  // ================= simulation =================
+  function simEval(p, rnd){
+    let bal=1, trades=0, carry=0;
+    const target=1+p.target, floor=1-p.maxDD, win=p.risk*p.R, loss=p.risk, perDay=p.tpw/7;
+    while(trades<p.evalCap){
+      carry += perDay;
+      const n = Math.floor(carry); carry -= n;
+      if(n===0) continue;
+      const dayFloor = bal*(1-p.dailyDD);
+      for(let t=0;t<n;t++){
+        trades++;
+        bal += (rnd()<p.winRate) ? win : -loss;
+        if(bal<=floor)   return {r:2,trades};
+        if(bal<=dayFloor)return {r:1,trades};
+        if(bal>=target)  return {r:0,trades};
+      }
+    }
+    return {r:3,trades};
+  }
+
+  function simFunded(p, rnd){
+    let bal=1, trades=0, cycles=0, paid=0, carry=0;
+    const floor=1-p.maxDD, win=p.risk*p.R, loss=p.risk, trig=1+p.payoutTrig, perDay=p.tpw/7;
+    const everyWin = p.payoutMode==='win';
+    while(trades<p.fundedCap){
+      carry += perDay;
+      const n = Math.floor(carry); carry -= n;
+      if(n===0) continue;
+      const dayFloor = bal*(1-p.dailyDD);
+      for(let t=0;t<n && trades<p.fundedCap;t++){
+        trades++;
+        const won = rnd()<p.winRate;
+        bal += won ? win : -loss;
+        if(bal<=floor || bal<=dayFloor) return {paid,cycles};
+        if(everyWin){ if(won && bal>1){ paid+=(bal-1)*p.split; bal=1; cycles++; } }
+        else if(bal>=trig){ paid+=(bal-1)*p.split; bal=1; cycles++; break; }
+      }
+    }
+    if(bal>1){ paid+=(bal-1)*p.split; cycles++; }
+    return {paid,cycles};
+  }
+
+  function fullSim(p, n, seed, wantDetail){
+    const rnd = mulberry32(seed);
+    let pass=0, daily=0, maxdd=0, unres=0, tradeSum=0, paidSum=0, cycleSum=0, beat=0, fundedNoPayout=0;
+    const cycleList=[];
+    for(let i=0;i<n;i++){
+      const e = simEval(p, rnd);
+      tradeSum += e.trades;
+      if(e.r===0){
+        pass++;
+        const f = simFunded(p, rnd);
+        paidSum += f.paid; cycleSum += f.cycles;
+        if(wantDetail) cycleList.push(f.cycles);
+        if(f.paid*p.acct > p.cost) beat++;
+        if(f.cycles===0) fundedNoPayout++;
+      } else if(e.r===1) daily++;
+      else if(e.r===2) maxdd++;
+      else unres++;
+    }
+    const passProb = pass/n;
+    const avgPaid = pass? paidSum/pass : 0;
+    const ev = passProb*avgPaid*p.acct - p.cost;
+    if(!wantDetail) return {ev, passProb, avgPaid};
+    cycleList.sort((a,b)=>a-b);
+    const median = cycleList.length? cycleList[Math.floor(cycleList.length/2)] : 0;
+    const buckets=[0,0,0,0,0];
+    for(const c of cycleList){
+      if(c===0) buckets[0]++; else if(c===1) buckets[1]++; else if(c===2) buckets[2]++;
+      else if(c<=5) buckets[3]++; else buckets[4]++;
+    }
+    return {ev, passProb, n, pass, daily, maxdd, unres, avgPaid,
+            avgTrades: tradeSum/n, avgCycles: pass? cycleSum/pass : 0,
+            medCycles: median, buckets, nFunded: cycleList.length,
+            beatProb: beat/n, fundedNoPayout: pass? fundedNoPayout/pass : 0};
+  }
+
+  function readParams(){
+    return {
+      winRate:+$('winRate').value/100, R:+$('rr').value,
+      risk: $('autoRisk').checked ? derivedRisk().risk : +$('risk').value/100,
+      tpw:Math.max(1, Math.round(+$('tpw').value||1)),
+      target:+$('target').value/100, maxDD:+$('maxdd').value/100, dailyDD:+$('dailydd').value/100,
+      acct:+$('acct').value, cost:+$('cost').value||0,
+      split:+$('split').value/100, payoutMode:$('payoutMode').value, payoutTrig:+$('payoutTrig').value/100,
+      evalCap:6000,
+      fundedCap:Math.max(1, Math.round((+$('tpw').value||1)*4.345*Math.max(1,+$('horizon').value||1)))
+    };
+  }
+
+  // ================= formatting =================
+  const fmt$ = v => (v<0?'-':'') + '$' + Math.abs(v).toLocaleString(undefined,{maximumFractionDigits:0});
+  const fmt$2 = v => (v<0?'-':'') + '$' + Math.abs(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  const fmtPct = (v,d=1) => (v*100).toFixed(d)+'%';
+  const esc = s => String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  // ================= accounts you actually hold =================
+  const ACCT_KEY='breakout-eval-accounts-v1';
+  let accounts=[], activeAcctId=null;
+
+  function loadAccounts(){
+    try{
+      const raw=localStorage.getItem(ACCT_KEY);
+      if(raw){ const d=JSON.parse(raw); accounts=d.list||[]; activeAcctId=d.active??null; }
+    }catch(e){ accounts=[]; activeAcctId=null; }
+  }
+  function saveAccounts(){
+    try{ localStorage.setItem(ACCT_KEY, JSON.stringify({list:accounts, active:activeAcctId})); }catch(e){}
+  }
+  const acctById = id => accounts.find(a=>a.id===id)||null;
+  function activeAccount(){ return acctById(activeAcctId); }
+
+  // rules the checker runs against: the selected account if there is one, else the Dashboard
+  function checkerRules(){
+    const a=activeAccount();
+    if(a){
+      const r = PLANS[a.plan] || {target:+$('target').value, maxdd:+$('maxdd').value, dailydd:+$('dailydd').value};
+      return {label:a.label, plan:a.plan, planName:isPaper(a.plan)?'Paper':cap(a.plan), size:a.size,
+              target:r.target/100, maxDD:r.maxdd/100, dailyDD:r.dailydd/100, bal:a.bal};
+    }
+    return {label:null, plan:$('plan').value, planName:$('plan').options[$('plan').selectedIndex].text,
+            size:+$('acct').value, target:+$('target').value/100,
+            maxDD:+$('maxdd').value/100, dailyDD:+$('dailydd').value/100, bal:+$('acct').value};
+  }
+
+  function renderAccounts(){
+    if(!accounts.length){
+      $('acctList').innerHTML='<div class="hint" style="margin:0">No accounts open yet. Set the plan and size above, then press Open this account.</div>';
+    } else {
+      $('acctList').innerHTML = accounts.map(a=>`
+        <div class="acctrow ${a.id===activeAcctId?'cur':''}">
+          <button class="pick" data-pick="${a.id}" title="Use this account for the Pre-Trade Check">
+            <b>${esc(a.label)}</b><span>${isPaper(a.plan)?'Paper':cap(a.plan)} · ${fmt$(a.size)} · bal ${fmt$(a.bal)}</span>
+          </button>
+          <button class="del" data-del="${a.id}" title="Close account" aria-label="Close account">×</button>
+        </div>`).join('');
+      $('acctList').querySelectorAll('[data-pick]').forEach(b=>b.addEventListener('click',()=>{
+        activeAcctId=+b.dataset.pick;
+        saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
+        renderJournal(); renderJournalStats(); renderLive();
+      }));
+      $('acctList').querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{
+        const id=+b.dataset.del;
+        accounts=accounts.filter(a=>a.id!==id);
+        if(activeAcctId===id) activeAcctId = accounts.length? accounts[0].id : null;
+        // its trades stay in the journal, filed under the closed account rather than merged in
+        saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
+        renderJournal(); renderJournalStats(); renderLive();
+      }));
+    }
+    // checker dropdown
+    const sel=$('cAcctSel');
+    sel.innerHTML = accounts.length
+      ? accounts.map(a=>`<option value="${a.id}">${esc(a.label)} — ${isPaper(a.plan)?'Paper':cap(a.plan)} ${fmt$(a.size)}</option>`).join('')
+      : '<option value="">Using Dashboard settings</option>';
+    if(accounts.length && activeAcctId!=null) sel.value=String(activeAcctId);
+    $('cAcctHint').textContent = accounts.length
+      ? 'Switch accounts here or on the Dashboard — the limits below follow it.'
+      : 'No accounts open. The checker is using the Dashboard plan and size.';
+  }
+
+  function syncAccountToChecker(){
+    const a=activeAccount();
+    // falls back to the Dashboard size when the last account is closed, so no stale balance lingers
+    $('cDayStart').value = a ? a.bal : (+$('acct').value||0);
+  }
+
+  $('acctAdd').addEventListener('click',()=>{
+    const plan=$('plan').value, size=+$('acct').value;
+    const n=accounts.filter(a=>a.plan===plan && a.size===size).length;
+    const label=(isPaper(plan)?'Paper':cap(plan))+' '+fmt$(size)+(n?' #'+(n+1):'');
+    const a={id:Date.now(), label, plan, size, bal:size};
+    accounts.push(a); activeAcctId=a.id;
+    saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
+    renderJournal(); renderJournalStats(); renderLive();
+  });
+
+  // ================= journal =================
+  let journal = [];
+  function loadJournal(){
+    try{ const raw=localStorage.getItem(JRN_KEY); if(raw) journal=JSON.parse(raw)||[]; }catch(e){ journal=[]; }
+    migrateJournal();
+  }
+  // Trades logged before accounts were kept separate carry a label but no id. Match them back by
+  // label so old history lands on the right account instead of counting against every account's
+  // daily limit. Anything unmatched becomes account-less rather than being guessed at.
+  function migrateJournal(){
+    let dirty=false;
+    for(const t of journal){
+      if(t.acctId===undefined){
+        const a = t.acctLabel ? accounts.find(x=>x.label===t.acctLabel) : null;
+        t.acctId = a ? a.id : null;
+        dirty=true;
+      }
+      if(t.pinned){ t.pinned=false; dirty=true; }
+      // a mark nowhere near the entry is a slip of the keyboard, not a price
+      if(t.mark!=null && +t.entry>0 && Math.abs(+t.mark - +t.entry) > +t.entry*0.5){ t.mark=null; dirty=true; }
+    }
+    if(dirty) saveJournal();
+  }
+  function saveJournal(){
+    try{ localStorage.setItem(JRN_KEY, JSON.stringify(journal)); }catch(e){}
+  }
+
+  // Which account a trade belongs to. null means it was logged against the Dashboard with no
+  // account selected. Every daily-limit figure is counted per account, because each account
+  // carries its own rules - a trade on one cannot consume a slot on another.
+  const jAcct = t => (t.acctId===undefined || t.acctId===null) ? null : t.acctId;
+  function acctTitle(id, sample){
+    if(id===null) return 'Not tied to an account';
+    const a=acctById(id);
+    if(a) return a.label;
+    return (sample && sample.acctLabel) ? sample.acctLabel+' · closed' : 'Closed account';
+  }
+  function acctSub(id){
+    const a=acctById(id);
+    if(!a) return id===null ? 'Dashboard settings' : 'account no longer open';
+    const r=PLANS[a.plan]||{};
+    return (isPaper(a.plan)?'Paper':cap(a.plan))+' '+fmt$(a.size)+' · '+r.dailydd+'% daily / '+r.maxdd+'% max DD';
+  }
+  // The Journal tab's own view filter. It never touches the Pre-Trade Check, which always
+  // follows whichever account is selected.
+  function jScope(){ const el=$('jFilter'); return el ? el.value : 'all'; }
+  function inScope(t){
+    const v=jScope();
+    if(v==='all') return true;
+    if(v==='none') return jAcct(t)===null;
+    return jAcct(t)===+v;
+  }
+  const scopedJournal = () => journal.filter(inScope);
+  const closedTrades = () => scopedJournal().filter(t=>t.status!=='open');
+  function groupByAcct(list){
+    const m=new Map();
+    for(const t of list){ const k=jAcct(t); if(!m.has(k)) m.set(k,[]); m.get(k).push(t); }
+    return [...m.entries()]
+      .map(([id,ts])=>({id, ts, name:acctTitle(id,ts[0]), sub:acctSub(id), cur:id===activeAcctId}))
+      .sort((a,b)=> (b.cur?1:0)-(a.cur?1:0) || a.name.localeCompare(b.name));
+  }
+  function renderJournalFilter(){
+    const sel=$('jFilter'), keep=sel.value;
+    const used=new Set(journal.map(jAcct));
+    let html='<option value="all">All accounts</option>';
+    accounts.forEach(a=>{
+      html+='<option value="'+a.id+'">'+esc(a.label)+(a.id===activeAcctId?' — selected':'')+'</option>';
+    });
+    // accounts closed since, that still own history, plus anything logged without an account
+    [...used].filter(id=>id!==null && !acctById(id)).forEach(id=>{
+      const t=journal.find(x=>jAcct(x)===id);
+      html+='<option value="'+id+'">'+esc(acctTitle(id,t))+'</option>';
+    });
+    if(used.has(null)) html+='<option value="none">Not tied to an account</option>';
+    sel.innerHTML=html;
+    sel.value = [...sel.options].some(o=>o.value===keep) ? keep : 'all';
+    $('jFilterHint').textContent = sel.value==='all'
+      ? 'Every account, grouped separately. Pick one to see its record on its own.'
+      : 'This account only — the stats below are its record alone.';
+    // the manual-entry account picker
+    const m=$('jAcctSel'), mk=m.value;
+    m.innerHTML = accounts.map(a=>'<option value="'+a.id+'">'+esc(a.label)+'</option>').join('')
+                + '<option value="none">No account (Dashboard settings)</option>';
+    m.value = [...m.options].some(o=>o.value===mk) ? mk
+            : (activeAcctId!=null ? String(activeAcctId) : 'none');
+  }
+  function journalStats(){
+    const closed = closedTrades();
+    const n=closed.length;
+    if(!n) return null;
+    let wins=0, losses=0, winRSum=0, lossRSum=0, riskPctSum=0, riskPctN=0, rSum=0;
+    const rs=[];
+    for(const t of closed){
+      const r = t.risk>0 ? t.pl/t.risk : 0;
+      rs.push(r); rSum+=r;
+      if(r>0){ wins++; winRSum+=r; } else if(r<0){ losses++; lossRSum+=Math.abs(r); }
+      if(t.acct>0 && t.risk>0){ riskPctSum += t.risk/t.acct; riskPctN++; }
+    }
+    const decided = wins+losses;
+    const winRate = decided? wins/decided : 0;
+    const avgWinR = wins? winRSum/wins : 0;
+    const avgLossR = losses? lossRSum/losses : 1;
+    const rr = avgLossR>0? avgWinR/avgLossR : avgWinR;
+    const riskPct = riskPctN? riskPctSum/riskPctN : null;
+    const dates = closed.map(t=>t.date).filter(Boolean).sort();
+    let weeks=1;
+    if(dates.length>1){
+      const ms = new Date(dates[dates.length-1]) - new Date(dates[0]);
+      weeks = Math.max(1, ms/(7*24*3600*1000));
+    }
+    const tpw = n/weeks;
+    // rolling last 20
+    const recent = rs.slice(-20);
+    const recentExp = recent.length? recent.reduce((a,b)=>a+b,0)/recent.length : 0;
+    // streak
+    let streak=0;
+    for(let i=rs.length-1;i>=0;i--){
+      if(rs[i]<0){ if(streak<=0) streak--; else break; }
+      else if(rs[i]>0){ if(streak>=0) streak++; else break; }
+      else break;
+    }
+    return {n, wins, losses, winRate, avgWinR, avgLossR, rr, riskPct, tpw,
+            expR: rSum/n, totalR: rSum, recentExp, recentN: recent.length, streak, rs,
+            netPL: closed.reduce((a,t)=>a+(+t.pl||0),0)};
+  }
+
+  // ================= what a trade actually cost =================
+  // Financing is charged per elapsed block, not per planned holding time, so a settled trade is
+  // priced from the hours it was really open rather than from the estimate made before entry.
+  function finFor(hours, plat){
+    return plat==='dx' ? FIN_DAILY*Math.ceil(hours/24) : FIN_BLOCK*Math.ceil(hours/4);
+  }
+  function openedMs(t){
+    if(t.opened){ const v=Date.parse(t.opened); if(!isNaN(v)) return v; }
+    if(t.date){ const v=Date.parse(t.date+'T00:00:00'); if(!isNaN(v)) return v; }
+    return Date.now();
+  }
+  const priceable = t => (+t.units>0 && +t.entry>0);
+
+  function settleCalc(t, exitPx, exitMs){
+    const units=+t.units||0, entry=+t.entry||0, dir = t.dir==='short' ? -1 : 1;
+    const hours = Math.max(0, (exitMs - openedMs(t))/3600000);
+    const plat = t.plat || 'bo';
+    const blocks = plat==='dx' ? Math.ceil(hours/24) : Math.ceil(hours/4);
+    const gross  = units*(exitPx-entry)*dir;
+    const feeIn  = units*entry*COMMISSION;
+    const feeOut = units*exitPx*COMMISSION;
+    const fin    = units*entry*finFor(hours, plat);
+    const net    = gross - feeIn - feeOut - fin;
+    // Slippage is measured against whichever level the fill landed nearest — that is the one
+    // you were aiming at. Positive means it filled better than the level, negative means worse.
+    let ref=null, refName='';
+    const stop=+t.stop||0, tgt=+t.target||0;
+    if(stop>0 && tgt>0) {
+      if(Math.abs(exitPx-stop) <= Math.abs(exitPx-tgt)){ ref=stop; refName='stop'; }
+      else { ref=tgt; refName='target'; }
+    } else if(stop>0){ ref=stop; refName='stop'; }
+    const slipPx = ref!=null ? (exitPx-ref)*dir : 0;
+    return {units, entry, dir, hours, blocks, plat, gross, feeIn, feeOut, fin,
+            fees: feeIn+feeOut+fin, net, R: t.risk>0 ? net/t.risk : 0,
+            ref, refName, slipPx, slip$: units*slipPx};
+  }
+  function liveState(t, px){
+    const dir = t.dir==='short' ? -1 : 1;
+    const stop=+t.stop||0, tgt=+t.target||0;
+    const span = (stop>0 && tgt>0) ? Math.abs(tgt-stop) : 0;
+    return {dir, stop, tgt, span,
+      hitStop: stop>0 && (dir>0 ? px<=stop : px>=stop),
+      hitTgt:  tgt>0  && (dir>0 ? px>=tgt  : px<=tgt),
+      prog: span>0 ? (px-stop)*dir/span : null,
+      entryAt: span>0 ? (entryOf(t)-stop)*dir/span : null};
+  }
+  const entryOf = t => +t.entry||0;
+  const clamp01 = v => Math.max(0, Math.min(1, v));
+  function dtLocal(d){
+    const p=v=>String(v).padStart(2,'0');
+    return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes());
+  }
+  const dirTag = t => '<span class="dir '+(t.dir==='short'?'short':'long')+'">'+(t.dir==='short'?'SHORT':'LONG')+'</span>';
+
+  // ================= OKX price feed =================
+  // Breakout prices BTCUSD and ETHUSD off OKX perpetual futures, so the tracker reads the same
+  // book rather than a spot price that drifts from it. Closing a long lifts the bid and closing
+  // a short takes the ask, so "P/L if closed now" uses the side you would actually get out on —
+  // the spread is a real cost and is already inside the figure.
+  const OKX_INST = { BTCUSD:'BTC-USDT-SWAP', ETHUSD:'ETH-USDT-SWAP' };
+  const feed = { px:{}, ts:0, ok:false, dead:false, fails:0 };
+  let feedTimer=null;
+
+  const openTrades = () => journal.filter(t=>t.status==='open');
+  function feedSymbols(){
+    const set=new Set(openTrades().map(t=>OKX_INST[t.sym]).filter(Boolean));
+    if($('cSym') && OKX_INST[$('cSym').value]) set.add(OKX_INST[$('cSym').value]);
+    return [...set];
+  }
+
+  async function pollFeed(){
+    const ids=feedSymbols();
+    if(!ids.length || feed.dead) return;
+    try{
+      const out = await Promise.all(ids.map(id=>
+        fetch('https://www.okx.com/api/v5/market/ticker?instId='+id, {cache:'no-store'})
+          .then(r=>r.ok ? r.json() : Promise.reject(new Error('HTTP '+r.status)))));
+      let got=false;
+      out.forEach(j=>{
+        const d = j && j.data && j.data[0];
+        if(!d || !(+d.last>0)) return;
+        feed.px[d.instId] = {last:+d.last, bid:+d.bidPx||+d.last, ask:+d.askPx||+d.last};
+        got=true;
+      });
+      if(!got) throw new Error('empty');
+      feed.ok=true; feed.fails=0; feed.ts=Date.now();
+      onFeed();
+    }catch(e){
+      feed.ok=false; feed.fails++;
+      feed.err = (e && (e.message||e.name)) || 'unknown';
+      // Some hosts block outbound requests entirely. Three straight failures means the feed is
+      // not coming, so stop retrying and hand the row back to manual entry rather than hammering.
+      if(feed.fails>=3){ feed.dead=true; if(feedTimer){ clearInterval(feedTimer); feedTimer=null; } }
+      renderFeedBar();
+    }
+  }
+
+  function startFeed(){
+    if(feedTimer || feed.dead) return;
+    pollFeed();
+    feedTimer=setInterval(()=>{ if(!d_hidden()) pollFeed(); }, 5000);
+  }
+  const d_hidden = () => (typeof document!=='undefined' && document.hidden);
+  if(typeof document!=='undefined'){
+    document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pollFeed(); });
+  }
+  function retryFeed(){ feed.dead=false; feed.fails=0; renderFeedBar(); startFeed(); }
+
+  const STALE_MS = 30000;
+  const feedStale = () => !feed.ok || (Date.now()-feed.ts) > STALE_MS;
+  const quoteFor = t => feed.px[OKX_INST[t.sym]] || null;
+  function livePx(t){
+    const q=quoteFor(t);
+    if(!q) return null;
+    return t.dir==='short' ? q.ask : q.bid;   // the side that closes the position
+  }
+  // a row follows the feed unless you have typed your own price into it
+  function markFor(t){
+    if(t.pinned && +t.mark>0) return +t.mark;
+    const lp=livePx(t);
+    if(lp!=null) return lp;
+    return +t.mark>0 ? +t.mark : null;
+  }
+  const px6 = v => v>=1000 ? v.toLocaleString(undefined,{maximumFractionDigits:1})
+                           : v.toLocaleString(undefined,{maximumFractionDigits:4});
+
+  function renderFeedBar(){
+    const bar=$('feedBar'); if(!bar) return;
+    if(feed.dead || (!feed.ok && feed.fails>0)){
+      bar.className='feedbar off';
+      bar.innerHTML='<span class="fdot"></span><span>OKX unreachable from this page — '+
+        '<b>'+esc(feed.err||'no response')+'</b> after '+feed.fails+' attempt'+(feed.fails===1?'':'s')+'. '+
+        'A published artifact is sandboxed against outbound requests; the local copy '+
+        '(<b>Downloads\Trading\Open Breakout Tracker.cmd</b>) has the live feed. '+
+        'Until then, type the price into each row.</span>'+
+        '<button type="button" id="feedRetry">Try again</button>';
+      const r=$('feedRetry'); if(r) r.addEventListener('click', retryFeed);
+      return;
+    }
+    if(!feed.ok){
+      bar.className='feedbar';
+      bar.innerHTML='<span class="fdot"></span><span>Connecting to OKX…</span>';
+      return;
+    }
+    const age=Math.max(0,Math.round((Date.now()-feed.ts)/1000));
+    const stale=feedStale();
+    const parts=Object.entries(feed.px).map(([id,q])=>
+      '<span><span class="fsrc">'+id+'</span> <b>'+px6(q.last)+'</b></span>');
+    bar.className='feedbar '+(stale?'off':'on');
+    bar.innerHTML='<span class="fdot"></span><span class="fsrc">OKX perpetuals</span>'+parts.join('')+
+      '<span class="fage">'+(stale ? 'stale · '+(age<90?age+'s':Math.round(age/60)+'m')+' old, tab was in the background'
+                                   : (age<2?'just now':age+'s ago'))+'</span>';
+  }
+
+  // Every 5s: refresh the readouts, and raise a standing alert the first time a position
+  // touches its stop or its target so a level reached while you were away is not lost.
+  function onFeed(){
+    let structural=false;
+    openTrades().forEach(t=>{
+      const px=markFor(t);
+      if(px==null) return;
+      const L=liveState(t,px);
+      const lvl = L.hitStop ? 'stop' : (L.hitTgt ? 'target' : null);
+      if(lvl && t.alerted!==lvl){
+        t.alerted=lvl; t.alertPx=px; t.alertAt=new Date().toISOString();
+        structural=true;
+      }
+    });
+    if(structural){ saveJournal(); renderLive(); }
+    else openTrades().forEach(refreshLive);
+    renderFeedBar();
+  }
+
+  // ================= live positions on the dashboard =================
+  function renderLive(){
+    const open = journal.filter(t=>t.status==='open').sort((a,b)=>b.id-a.id);
+    $('dLiveCard').hidden = open.length===0;
+    $('dLiveCount').textContent = open.length ? ' '+open.length : '';
+    if(!open.length){ $('dLive').innerHTML=''; renderFeedBar(); return; }
+    const groups = groupByAcct(open);
+    $('dLive').innerHTML = groups.map(g=>
+      (groups.length>1 ? '<div class="ohead '+(g.cur?'cur':'')+'">'+esc(g.name)+'<span class="gsub">'+esc(g.sub)+'</span></div>' : '')
+      + g.ts.map(liveRow).join('')).join('');
+    wireLive();
+    renderFeedBar();
+    startFeed();
+  }
+
+  // Bound once. renderLive only ever replaces #dLive's contents, so delegated handlers survive —
+  // and a chip rewritten by refreshLive keeps working, which per-element listeners would not.
+  function wireLive(){
+    const host=$('dLive');
+    if(!host || host.dataset.wired) return;
+    host.dataset.wired='1';
+    const tradeOf = el => journal.find(x=>x.id===+el.dataset.id || x.id===+el.dataset.pin ||
+                                          x.id===+el.dataset.unpin || x.id===+el.dataset.clearalert);
+    host.addEventListener('input', e=>{
+      const inp=e.target.closest('.lmark'); if(!inp) return;
+      const t=tradeOf(inp); if(!t) return;
+      t.mark = inp.value===''? null : +inp.value;
+      refreshLive(t);
+    });
+    host.addEventListener('change', e=>{ if(e.target.closest('.lmark')) saveJournal(); });
+    host.addEventListener('click', e=>{
+      const pin=e.target.closest('[data-pin]');
+      if(pin){ const t=tradeOf(pin); if(t){ t.pinned=true; t.mark=livePx(t)??t.mark??+t.entry; saveJournal(); renderLive();
+               const box=$('dLive').querySelector('[data-row="'+t.id+'"] .lmark'); if(box) box.focus(); } return; }
+      const un=e.target.closest('[data-unpin]');
+      if(un){ const t=tradeOf(un); if(t){ t.pinned=false; t.mark=null; saveJournal(); renderLive(); } return; }
+      const ca=e.target.closest('[data-clearalert]');
+      if(ca){ const t=tradeOf(ca); if(t){ t.alerted=null; saveJournal(); renderLive(); } return; }
+      const st=e.target.closest('[data-settle]');
+      if(st) openSettle(+st.dataset.settle, st.dataset.how);
+    });
+  }
+
+  function liveRow(t){
+    const px = markFor(t);
+    const can = priceable(t);
+    const id=t.id;
+    const money = can && px!=null;
+    const c = money ? settleCalc(t, px, Date.now()) : null;
+    const L = money ? liveState(t, px) : null;
+    const cls = L ? (L.hitStop?'hitStop':(L.hitTgt?'hitTgt':'')) : '';
+    return '<div class="live '+cls+'" data-row="'+id+'" data-mode="'+liveMode(t)+'">'+
+      '<div class="lhead"><b>'+esc(t.sym||'—')+' '+dirTag(t)+'</b>'+
+        '<span class="lacct">'+(t.entry? 'entry '+t.entry+' · ':'')+fmt$(t.risk)+' at risk · opened '+
+          esc((t.opened||t.date||'').slice(0,16).replace('T',' '))+'</span>'+
+        '<span class="lflag" data-out="flag-'+id+'">'+liveFlag(L)+'</span></div>'+
+      '<div class="lgrid">'+
+        priceCell(t)+
+        '<div><span class="lk">P/L if closed now</span><span class="lv '+plCls(c)+'" data-out="pl-'+id+'">'+(c?fmt$2(c.net):'—')+'</span></div>'+
+        '<div><span class="lk">R so far</span><span class="lv '+plCls(c)+'" data-out="r-'+id+'">'+(c?(c.R>=0?'+':'')+c.R.toFixed(2)+'R':'—')+'</span></div>'+
+        '<div><span class="lk">Held</span><span class="lv" data-out="held-'+id+'">'+(c?c.hours.toFixed(1)+'h':'—')+'</span></div>'+
+        '<div><span class="lk">Costs so far</span><span class="lv" data-out="fees-'+id+'">'+(c?fmt$2(c.fees):'—')+'</span></div>'+
+      '</div>'+
+      track(t, L, id)+
+      alertBanner(t)+
+      '<div class="btnrow">'+
+        '<button class="btn win" data-settle="'+id+'" data-how="win">Settle as target</button>'+
+        '<button class="btn loss" data-settle="'+id+'" data-how="loss">Settle as stopped</button>'+
+        '<button class="btn manual" data-settle="'+id+'" data-how="manual">Settle at another price</button>'+
+      '</div></div>';
+  }
+  const plCls = c => !c ? '' : (c.net>=0?'pos':'neg');
+
+  // A row is either following OKX or being typed into. When it follows, the price is a readout —
+  // there is nothing to fill in — and it is rewritten on every tick. Switching between the two
+  // changes the markup, so the mode is stamped on the row and a change forces a full re-render.
+  const liveMode = t => (livePx(t)!=null && !t.pinned) ? 'live' : 'manual';
+  function chipHtml(t){
+    if(liveMode(t)==='live') return '<span class="lchip '+(feedStale()?'stale':'okx')+'">OKX'+(feedStale()?' · stale':'')+'</span>';
+    return livePx(t)!=null ? '<button type="button" class="lchip pin" data-unpin="'+t.id+'">yours · back to OKX</button>' : '';
+  }
+  function priceCell(t){
+    const id=t.id;
+    const head='<div><span class="lk">Price now<span data-out="chip-'+id+'">'+chipHtml(t)+'</span></span>';
+    if(liveMode(t)==='live'){
+      return head+'<span class="lv" data-live data-out="px-'+id+'">'+px6(livePx(t))+'</span>'+
+             '<button type="button" class="lmini" data-pin="'+id+'">type my own</button></div>';
+    }
+    const v = (t.mark!=null && +t.mark>0) ? t.mark : '';
+    return head+'<input type="number" class="lmark" data-id="'+id+'" step="any" value="'+v+'" placeholder="'+(t.entry||'')+'"></div>';
+  }
+  // The alert stands until the trade is settled or you clear it, so a level touched while the
+  // tab was in the background is still waiting when you come back — even if price retraced.
+  function alertBanner(t){
+    if(!t.alerted) return '';
+    const tgt = t.alerted==='target';
+    const when = t.alertAt ? new Date(t.alertAt).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}) : '';
+    return '<div class="lalert '+(tgt?'tgt':'stp')+'">'+
+      (tgt?'Target':'Stop')+' reached at '+px6(+t.alertPx||0)+(when?' · '+when:'')+
+      ' — settle it with your actual fill'+
+      '<button class="btn '+(tgt?'win':'loss')+'" data-settle="'+t.id+'" data-how="'+(tgt?'win':'loss')+'">Settle now</button>'+
+      '<button class="del" data-clearalert="'+t.id+'" title="Dismiss" aria-label="Dismiss">×</button></div>';
+  }
+  function liveFlag(L){
+    if(!L) return 'enter a price';
+    if(L.hitStop) return 'stop level reached — settle it';
+    if(L.hitTgt)  return 'target reached — settle it';
+    return L.prog!=null ? Math.round(L.prog*100)+'% of the way to target' : 'running';
+  }
+  function track(t, L, id){
+    if(!(+t.stop>0 && +t.target>0)) return '<p class="lfoot">No stop and target recorded, so there is nothing to track against.</p>';
+    const p = L && L.prog!=null ? clamp01(L.prog) : 0;
+    const e = L && L.entryAt!=null ? clamp01(L.entryAt) : clamp01((entryOf(t)-(+t.stop))*(t.dir==='short'?-1:1)/Math.abs(+t.target-+t.stop));
+    return '<div class="ltrack">'+
+      '<div class="fill" data-out="fill-'+id+'" style="width:'+(p*100).toFixed(1)+'%"></div>'+
+      '<div class="mk" style="left:'+(e*100).toFixed(1)+'%"></div>'+
+      '<div class="mk now" data-out="now-'+id+'" style="left:'+(p*100).toFixed(1)+'%"></div>'+
+      '<div class="cap l">stop '+t.stop+'</div>'+
+      '<div class="cap r">target '+t.target+'</div></div>';
+  }
+  // Update only the readouts, so a box being typed into keeps focus. The price itself is one of
+  // those readouts — without this a feed-driven row renders once and then never moves again.
+  function refreshLive(t){
+    const id=t.id, row=$('dLive').querySelector('[data-row="'+id+'"]');
+    if(!row) return;
+    if(row.dataset.mode !== liveMode(t)){ renderLive(); return; }   // readout <-> box needs new markup
+    const px = markFor(t);
+    const money = priceable(t) && px!=null;
+    const pxOut = row.querySelector('[data-out="px-'+id+'"]');
+    if(pxOut && px!=null) pxOut.textContent = px6(px);
+    const chip = row.querySelector('[data-out="chip-'+id+'"]');
+    if(chip){ const h=chipHtml(t); if(chip.innerHTML!==h) chip.innerHTML=h; }
+    const c = money ? settleCalc(t, px, Date.now()) : null;
+    const L = money ? liveState(t, px) : null;
+    const set=(k,v,cls)=>{ const el=row.querySelector('[data-out="'+k+'-'+id+'"]'); if(!el) return;
+      el.textContent=v; if(cls!=null){ el.classList.remove('pos','neg'); if(cls) el.classList.add(cls); } };
+    set('pl', c?fmt$2(c.net):'—', c?(c.net>=0?'pos':'neg'):'');
+    set('r',  c?(c.R>=0?'+':'')+c.R.toFixed(2)+'R':'—', c?(c.net>=0?'pos':'neg'):'');
+    set('held', c?c.hours.toFixed(1)+'h':'—');
+    set('fees', c?fmt$2(c.fees):'—');
+    set('flag', liveFlag(L));
+    row.classList.remove('hitStop','hitTgt');
+    if(L && L.hitStop) row.classList.add('hitStop');
+    else if(L && L.hitTgt) row.classList.add('hitTgt');
+    const p = L && L.prog!=null ? clamp01(L.prog)*100 : 0;
+    const fill=row.querySelector('[data-out="fill-'+id+'"]'), now=row.querySelector('[data-out="now-'+id+'"]');
+    if(fill) fill.style.width = p.toFixed(1)+'%';
+    if(now)  now.style.left   = p.toFixed(1)+'%';
+  }
+
+  // ================= journal =================
+  let settling = null;   // the trade being verified before it enters the record
+
+  function renderJournal(){
+    renderJournalFilter();
+    const scoped = scopedJournal();
+
+    // ---- open positions, kept apart by account ----
+    const open = scoped.filter(t=>t.status==='open')
+      .sort((a,b)=> (b.date||'').localeCompare(a.date||'') || b.id-a.id);
+    $('jOpenCard').hidden = open.length===0;
+    const og = groupByAcct(open);
+    $('jOpen').innerHTML = og.map(g=>'<div class="ogroup">'+
+      (og.length>1 ? '<div class="ohead '+(g.cur?'cur':'')+'">'+esc(g.name)+'<span class="gsub">'+esc(g.sub)+'</span></div>' : '')+
+      g.ts.map(openRow).join('')+'</div>').join('');
+    $('jOpen').querySelectorAll('[data-settle]').forEach(b=>b.addEventListener('click',()=>
+      openSettle(+b.dataset.settle, b.dataset.how)));
+    $('jOpen').querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{
+      journal = journal.filter(t=>t.id!==+b.dataset.del);
+      if(settling && !journal.some(t=>t.id===settling.id)) settling=null;
+      saveJournal(); renderJournal(); renderJournalStats(); syncCheckerToday(); renderLive(); renderChecker();
+    }));
+    wireSettle();
+
+    // ---- closed trades, grouped the same way ----
+    const closed = closedTrades().sort((a,b)=> (b.dateClosed||b.date||'').localeCompare(a.dateClosed||a.date||'') || b.id-a.id);
+    const cg = groupByAcct(closed);
+    const tb=$('jrnTable').querySelector('tbody');
+    tb.innerHTML = cg.map(g=>
+      (cg.length>1 ? '<tr class="ghead '+(g.cur?'cur':'')+'"><td colspan="8">'+esc(g.name)+
+                     '<span class="gsub">'+esc(g.sub)+' · '+g.ts.length+' trade'+(g.ts.length===1?'':'s')+'</span></td></tr>' : '')
+      + g.ts.map(closedRow).join('')).join('');
+    $('jrnEmpty').hidden = closed.length>0;
+    $('jrnCount').textContent = journal.length? journal.length : '';
+    $('jrnCount2').textContent = closed.length? ' · '+closed.length : '';
+    tb.querySelectorAll('.del').forEach(b=>b.addEventListener('click',()=>{
+      journal = journal.filter(t=>t.id!==+b.dataset.id);
+      // the checker counts trades and today's P/L off the journal, so it has to be told too
+      saveJournal(); renderJournal(); renderJournalStats(); syncCheckerToday(); renderLive(); renderChecker();
+      if($('useTracked').checked) applyTracked();
+    }));
+  }
+
+  function openRow(t){
+    // the ratio you drew, then what it lands as after the buffer and the costs
+    const tgtR = t.plannedGrossR
+      ? t.plannedGrossR.toFixed(2)+'R (' + (t.plannedR? t.plannedR.toFixed(2)+'R net' : 'net n/a') + ')'
+      : (t.plannedR ? t.plannedR.toFixed(2)+'R net' : '—');
+    const row = '<div class="openrow">'+
+      '<div class="oinfo"><b>'+esc(t.sym||'—')+' '+dirTag(t)+'</b>'+
+        '<span>'+esc(t.date||'')+' · '+fmt$(t.risk)+' at risk'+
+        (t.units? ' · '+(+t.units).toLocaleString(undefined,{maximumFractionDigits:6})+' units' : '')+
+        (t.entry? ' · in '+t.entry+' / stop '+t.stop+(t.target? ' / target '+t.target : '') : '')+
+        ' · plan '+tgtR+'</span></div>'+
+      '<div class="btnrow">'+
+        '<button class="btn win" data-settle="'+t.id+'" data-how="win">Hit target</button>'+
+        '<button class="btn loss" data-settle="'+t.id+'" data-how="loss">Stopped out</button>'+
+        '<button class="btn manual" data-settle="'+t.id+'" data-how="manual">Closed early</button>'+
+        '<button class="del" data-del="'+t.id+'" title="Delete" aria-label="Delete">×</button>'+
+      '</div></div>';
+    return row + (settling && settling.id===t.id ? settlePanel(t) : '');
+  }
+
+  function closedRow(t){
+    const r = t.risk>0 ? t.pl/t.risk : 0;
+    return '<tr><td>'+esc(t.dateClosed||t.date||'')+(t.paper?' <span class="paperbadge">P</span>':'')+'</td>'+
+      '<td>'+esc(t.sym||'')+'</td>'+
+      '<td class="dir '+(t.dir==='short'?'short':'long')+'">'+(t.dir==='short'?'SHORT':'LONG')+'</td>'+
+      '<td>'+fmt$(t.risk)+'</td>'+
+      '<td>'+(t.fees!=null? fmt$2(t.fees) : '—')+'</td>'+
+      '<td class="'+(t.pl>=0?'pos':'neg')+'">'+fmt$(t.pl)+'</td>'+
+      '<td class="'+(r>=0?'pos':'neg')+'">'+(r>=0?'+':'')+r.toFixed(2)+'R</td>'+
+      '<td><button class="del" data-id="'+t.id+'" title="Delete" aria-label="Delete trade">×</button></td></tr>';
+  }
+
+  // ---- settlement: nothing enters the record until the real fill is confirmed ----
+  function openSettle(id, how){
+    const t=journal.find(x=>x.id===id); if(!t) return;
+    const px = how==='win'  ? (+t.target||+t.mark||+t.entry||'')
+             : how==='loss' ? (+t.stop  ||+t.mark||+t.entry||'')
+             : (+t.mark||+t.entry||'');
+    settling = {id, how, exit:px||'', when:dtLocal(new Date()), override:''};
+    // the panel lives on the Journal tab, so bring it into view wherever it was triggered from
+    showView('view-jrn');
+    renderJournal(); renderJournalStats();
+    const box=$('settleBox');
+    if(box && box.scrollIntoView) box.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+
+  function settlePanel(t){
+    const can = priceable(t);
+    const atLevel = can && (settling.how==='win' || settling.how==='loss');
+    const lvlName = settling.how==='win' ? 'target' : 'stop';
+    return '<div class="settle" id="settleBox">'+
+      '<h4>'+(atLevel ? 'Settling at your '+lvlName+' — check the costs' : 'Check this before it goes in the record')+'</h4>'+
+      '<p class="shint">'+(!can
+        ? 'This one was logged without a price and size, so only the final P/L can be recorded.'
+        : atLevel
+          ? 'Filled at the '+lvlName+' you recorded, <b>'+ (settling.how==='win'? t.target : t.stop) +'</b>. '+
+            'Both commissions and the financing for the hours it was really open are priced from that. '+
+            'If the fill was somewhere else, cancel and use <b>Closed early</b>.'
+          : 'Enter the fill you actually got. Both commissions and the financing for the hours it was really open '+
+            'are priced from it, along with the gap between that fill and the level you were aiming at.')+'</p>'+
+      '<div class="sfields">'+
+        (can && !atLevel
+          ? '<div class="field"><label><span class="lbl">Exit fill price</span></label>'+
+            '<input type="number" id="sExit" step="any" value="'+settling.exit+'"></div>'
+          : '')+
+        (can
+          ? '<div class="field"><label><span class="lbl">Closed at</span></label>'+
+            '<input type="datetime-local" id="sWhen" value="'+settling.when+'"></div>'
+          : '')+
+        '<div class="field"><label><span class="lbl">Broker P/L $</span></label>'+
+        '<input type="number" id="sOverride" step="any" value="'+settling.override+'" placeholder="'+
+          (can?'optional — overrides the figure below':'required')+'"></div>'+
+      '</div>'+
+      (atLevel ? '<input type="hidden" id="sExit" value="'+settling.exit+'">' : '')+
+      '<div id="sBody"></div>'+
+      '<div class="btnrow" style="margin-top:12px">'+
+        '<button class="btn '+(settling.how==='loss'?'loss':'win')+'" id="sConfirm" type="button">Confirm and close</button>'+
+        '<button class="btn ghost" id="sCancel" type="button">Cancel</button>'+
+        '<span class="hint" id="sMsg" style="margin:0"></span>'+
+      '</div></div>';
+  }
+
+  function wireSettle(){
+    if(!settling || !$('settleBox')) return;
+    ['sExit','sWhen','sOverride'].forEach(id=>{ const el=$(id); if(el && el.type!=='hidden') el.addEventListener('input',()=>{
+      if(id==='sExit') settling.exit=el.value;
+      if(id==='sWhen') settling.when=el.value;
+      if(id==='sOverride') settling.override=el.value;
+      renderSettleBody();
+    }); });
+    $('sCancel').addEventListener('click',()=>{ settling=null; renderJournal(); });
+    $('sConfirm').addEventListener('click', confirmSettle);
+    renderSettleBody();
+  }
+
+  function renderSettleBody(){
+    const box=$('sBody'); if(!box || !settling) return;
+    const t=journal.find(x=>x.id===settling.id); if(!t) return;
+    const ovRaw = $('sOverride') ? $('sOverride').value : '';
+    const ov = ovRaw!=='' && !isNaN(+ovRaw) ? +ovRaw : null;
+    if(!priceable(t)){
+      const R = (ov!=null && t.risk>0) ? ov/t.risk : 0;
+      box.innerHTML = '<div class="srow tot"><span>Recorded P/L</span><span class="'+(ov>=0?'pos':'neg')+'">'+
+        (ov==null?'—':fmt$2(ov)+' · '+(R>=0?'+':'')+R.toFixed(2)+'R')+'</span></div>';
+      return;
+    }
+    const px = +$('sExit').value||0;
+    const ms = Date.parse($('sWhen').value) || Date.now();
+    if(!(px>0)){ box.innerHTML='<div class="srow note">Enter the exit fill price to price the trade out.</div>'; return; }
+    const c = settleCalc(t, px, ms);
+    const net = ov!=null ? ov : c.net;
+    const R = t.risk>0 ? net/t.risk : 0;
+    const planned = t.plannedFees!=null ? +t.plannedFees : null;
+    box.innerHTML =
+      '<div class="srow"><span>Gross move · '+(+t.units).toLocaleString(undefined,{maximumFractionDigits:6})+' units</span>'+
+        '<span class="'+(c.gross>=0?'pos':'neg')+'">'+fmt$2(c.gross)+'</span></div>'+
+      '<div class="srow"><span>Entry commission · 0.04%</span><span class="neg">−'+fmt$2(c.feeIn)+'</span></div>'+
+      '<div class="srow"><span>Exit commission · 0.04%</span><span class="neg">−'+fmt$2(c.feeOut)+'</span></div>'+
+      '<div class="srow"><span>Financing · '+c.hours.toFixed(1)+'h held = '+c.blocks+' '+(c.plat==='dx'?'day':'4h block')+(c.blocks===1?'':'s')+'</span>'+
+        '<span class="neg">−'+fmt$2(c.fin)+'</span></div>'+
+      '<div class="srow tot"><span>'+(ov!=null?'Your broker figure':'Net P/L')+'</span>'+
+        '<span class="'+(net>=0?'pos':'neg')+'">'+fmt$2(net)+' · '+(R>=0?'+':'')+R.toFixed(2)+'R</span></div>'+
+      (ov!=null && Math.abs(ov-c.net)>0.5
+        ? '<div class="srow note">Your figure is '+fmt$2(Math.abs(ov-c.net))+' '+(ov>c.net?'better':'worse')+
+          ' than this calculation. Yours is what gets recorded — if the gap is large, check the exit price and the time.</div>' : '')+
+      (c.ref!=null && Math.abs(c.slipPx)>=0.005
+        ? '<div class="srow note">Slippage: filled '+fmt$2(Math.abs(c.slipPx))+' '+(c.slipPx>=0?'better than':'past')+
+          ' your '+c.refName+' of '+c.ref+' — '+(c.slipPx>=0?'worth ':'a cost of ')+fmt$2(Math.abs(c.slip$))+'.'+
+          (planned!=null ? ' The checker budgeted '+fmt$2(planned)+' of costs; this trade paid '+fmt$2(c.fees)+'.' : '')+'</div>'
+        : planned!=null
+          ? '<div class="srow note">Filled exactly at your '+(c.refName||'level')+', so no slippage. '+
+            'The checker budgeted '+fmt$2(planned)+' of costs; this trade paid '+fmt$2(c.fees)+'.</div>'
+          : '');
+  }
+
+  function confirmSettle(){
+    const t=journal.find(x=>x.id===settling.id); if(!t) return;
+    const ovRaw = $('sOverride') ? $('sOverride').value : '';
+    const ov = ovRaw!=='' && !isNaN(+ovRaw) ? +ovRaw : null;
+    if(priceable(t)){
+      const px=+$('sExit').value||0;
+      const ms=Date.parse($('sWhen').value) || Date.now();
+      if(!(px>0) && ov==null){ $('sMsg').textContent='Enter the exit price, or the P/L your broker shows.'; return; }
+      if(px>0){
+        const c=settleCalc(t,px,ms);
+        t.exit=px;
+        t.closedAt=new Date(ms).toISOString();
+        t.dateClosed=tradingDay(ms);
+        t.holdH=Math.round(c.hours*10)/10;
+        t.fees=Math.round(c.fees*100)/100;
+        t.slip=c.ref!=null ? Math.round(c.slip$*100)/100 : null;
+        t.pl = ov!=null ? ov : Math.round(c.net*100)/100;
+      } else {
+        t.pl=ov; t.dateClosed=tradingDay();
+      }
+    } else {
+      if(ov==null){ $('sMsg').textContent='Enter the P/L for this trade.'; return; }
+      t.pl=ov; t.dateClosed=tradingDay();
+    }
+    t.status='closed';
+    t.mark=null;
+    settling=null;
+    saveJournal(); renderJournal(); renderJournalStats(); syncCheckerToday(); renderLive(); renderChecker();
+    if($('useTracked').checked){ applyTracked(); debounced(); }
+  }
+
+  function renderJournalStats(){
+    const s=journalStats();
+    const box=$('jStats');
+    if(!s){
+      $('jStatsSub').textContent='Log a few trades and your real win rate, R multiple and risk size appear here.';
+      box.innerHTML=''; $('eqChart').innerHTML=''; return;
+    }
+    const be = 1/(1+s.rr);
+    const paperN = closedTrades().filter(t=>t.paper).length;
+    $('jStatsSub').textContent = `${s.n} trade${s.n===1?'':'s'} logged over ${(s.n/Math.max(s.tpw,0.01)).toFixed(1)} week${s.n/s.tpw===1?'':'s'}`+
+      (paperN ? ` (${paperN} on paper)` : '')+
+      `. Breakeven win rate at ${s.rr.toFixed(2)}R is ${fmtPct(be)}. Every figure here is after commissions and financing.`;
+    const tiles=[
+      {k:'Win rate', v:fmtPct(s.winRate), s:`${s.wins}W / ${s.losses}L`, cls:s.winRate>=be?'pos':'neg'},
+      {k:'Avg win', v:'+'+s.avgWinR.toFixed(2)+'R', s:'avg loss −'+s.avgLossR.toFixed(2)+'R'},
+      {k:'R : R', v:s.rr.toFixed(2)+'R', s:'reward per 1R risked'},
+      {k:'Expectancy', v:(s.expR>=0?'+':'')+s.expR.toFixed(3)+'R', s:'per trade', cls:s.expR>=0?'pos':'neg'},
+      {k:'Total', v:(s.totalR>=0?'+':'')+s.totalR.toFixed(1)+'R', s:fmt$(s.netPL)+' net', cls:s.totalR>=0?'pos':'neg'},
+      {k:'Avg risk', v:s.riskPct!=null? fmtPct(s.riskPct,2) : '—', s:'of account'},
+      {k:'Trades / week', v:s.tpw.toFixed(1), s:'your real pace'},
+      {k:'Current streak', v:(s.streak>0?'+':'')+s.streak, s:s.streak<0?'losses in a row':'wins in a row', cls:s.streak<0?'neg':'pos'}
+    ];
+    box.innerHTML = tiles.map(t=>`<div class="tile"><div class="k">${t.k}</div><div class="v ${t.cls||''}">${t.v}</div><div class="s">${t.s}</div></div>`).join('');
+
+    // equity curve in R
+    const W=760,H=180,mL=44,mR=12,mT=12,mB=24;
+    let cum=0; const pts=[{i:0,v:0}];
+    s.rs.forEach((r,i)=>{ cum+=r; pts.push({i:i+1,v:cum}); });
+    const vs=pts.map(p=>p.v);
+    let yMin=Math.min(0,...vs), yMax=Math.max(0,...vs);
+    if(yMax===yMin){yMax+=1;yMin-=1}
+    const pad=(yMax-yMin)*.12; yMin-=pad; yMax+=pad;
+    const X=i=>mL+(pts.length<2?0:i/(pts.length-1))*(W-mL-mR);
+    const Y=v=>mT+(yMax-v)/(yMax-yMin)*(H-mT-mB);
+    let g='';
+    for(let k=0;k<=3;k++){
+      const v=yMin+(yMax-yMin)*k/3, y=Y(v);
+      g+=`<line x1="${mL}" y1="${y}" x2="${W-mR}" y2="${y}" stroke="var(--grid)" stroke-width="1"/>`;
+      g+=`<text x="${mL-7}" y="${y+4}" text-anchor="end">${v>=0?'+':''}${v.toFixed(1)}R</text>`;
+    }
+    if(yMin<0&&yMax>0) g+=`<line x1="${mL}" y1="${Y(0)}" x2="${W-mR}" y2="${Y(0)}" stroke="var(--axis)" stroke-width="1.5"/>`;
+    g+=`<path d="${pts.map((p,i)=>(i?'L':'M')+X(p.i).toFixed(1)+' '+Y(p.v).toFixed(1)).join(' ')}" fill="none" stroke="${cum>=0?'var(--good)':'var(--bad)'}" stroke-width="2" stroke-linejoin="round"/>`;
+    g+=`<text x="${(mL+W-mR)/2}" y="${H-6}" text-anchor="middle">${s.n} trades · cumulative R</text>`;
+    $('eqChart').innerHTML=g;
+  }
+
+  function applyTracked(){
+    const s=journalStats();
+    if(!s || s.n<5){
+      $('trackedHint').textContent = s? `Only ${s.n} trade${s.n===1?'':'s'} logged — need at least 5 before the journal drives these.` : 'No trades logged yet — log some on the Journal tab.';
+      return false;
+    }
+    setPair('winRate', Math.min(95,Math.max(5, s.winRate*100)).toFixed(1));
+    setPair('rr', Math.min(10,Math.max(0.2, s.rr)).toFixed(1));
+    // when risk is derived from the account rules it wins — that is a rule, not an observation
+    if(s.riskPct!=null && !$('autoRisk').checked) setPair('risk', Math.min(10,Math.max(0.1, s.riskPct*100)).toFixed(1));
+    $('tpw').value = Math.max(1, Math.round(s.tpw));
+    $('trackedHint').textContent = `Driven by your ${s.n} logged trades. Turn off "Use journal" to override.`;
+    return true;
+  }
+  function setPair(id,val){ $(id).value=val; $(id+'N').value=val; showPair(id); }
+  function showPair(id){
+    const v=+$(id).value;
+    if(id==='winRate') $('winRateVal').textContent=v.toFixed(1)+'%';
+    if(id==='rr') $('rrVal').textContent=v.toFixed(1)+'R';
+    if(id==='risk') $('riskVal').textContent = ($('autoRisk').checked ? (+$('riskN').value) : v).toFixed(2)+'%';
+  }
+  function lockTracked(on){
+    ['winRate','winRateN','rr','rrN','tpw'].forEach(id=>$(id).disabled=on);
+    ['risk','riskN'].forEach(id=>$(id).disabled = on || $('autoRisk').checked);
+    if(!on) $('trackedHint').textContent='Spread across 7 days — crypto trades all week.';
+  }
+
+  // ================= risk per trade, derived from the account =================
+  // Two separate ceilings, and which one bites depends on the plan:
+  //   · the daily budget — identical across plans, since all three cap daily loss at 3%
+  //   · surviving a losing streak inside the STATIC max drawdown — 6% / 5% / 3%, so this
+  //     is the constraint that actually differs, and it is why Turbo demands smaller size.
+  // The streak length comes from your own win rate: the run you'd hit 1 time in 20.
+  function derivedRisk(){
+    const dailyDD = +$('dailydd').value/100;
+    const maxDD   = +$('maxdd').value/100;
+    const w       = +$('winRate').value/100;
+    const nPerDay = Math.max(1, Math.round(+$('cMaxTrades').value||2));
+    const usePct  = Math.min(1, Math.max(0.1, (+$('cUsePct').value||85)/100));
+    // The strategy is the daily budget: the day's allowance, less the safety margin, split into
+    // equal trades. That is the size — nothing silently overrides it. Surviving a losing streak
+    // inside the static drawdown is still worth knowing, so it is computed and warned about,
+    // but it does not shrink the trade behind your back.
+    const dailyCap = dailyDD*usePct/nPerDay;
+    const streak = (w>0 && w<1) ? Math.ceil(Math.log(0.05)/Math.log(1-w)) : 1;
+    const ddCap = maxDD/streak;
+    const risk = Math.max(0.001, dailyCap);
+    return {dailyCap, ddCap, streak, risk, nPerDay, usePct,
+            streakBreaches: dailyCap*streak > maxDD,
+            lossesToBreach: dailyCap>0 ? Math.ceil(maxDD/dailyCap) : Infinity};
+  }
+
+  // Each plan sized on its own daily budget. All three cap daily loss at 3%, so this comes out
+  // the same for each — the plans then differ in the simulation by their drawdown floor and
+  // profit target, which is exactly where the difference belongs.
+  function planRisk(k){
+    if(!$('autoRisk').checked || !PLANS[k]) return +$('risk').value/100;
+    const nPerDay = Math.max(1, Math.round(+$('cMaxTrades').value||2));
+    const usePct  = Math.min(1, Math.max(0.1, (+$('cUsePct').value||85)/100));
+    return Math.max(0.001, PLANS[k].dailydd/100*usePct/nPerDay);
+  }
+
+  function applyAutoRisk(){
+    if(!$('autoRisk').checked){
+      $('autoRiskHint').textContent='Set by hand. Tick the box to size it from the plan’s drawdown rules instead.';
+      return;
+    }
+    const d = derivedRisk();
+    const pct = Math.min(10, Math.max(0.1, d.risk*100));
+    setPair('risk', pct.toFixed(3));
+    $('autoRiskHint').innerHTML =
+      `<strong>Daily budget:</strong> ${(+$('dailydd').value).toFixed(1)}% × ${(d.usePct*100).toFixed(0)}% over ${d.nPerDay} trades = <strong>${(d.dailyCap*100).toFixed(3)}%</strong> each, commissions and financing included; the buffer covers slippage. `+
+      (d.streakBreaches
+        ? `<span style="color:var(--warn)">Watch the floor: ${d.lossesToBreach} straight losses at this size clears the ${(+$('maxdd').value).toFixed(1)}% max drawdown, and at ${fmtPct(+$('winRate').value/100,0)} wins a ${d.streak}-loss run is normal.</span>`
+        : `A ${d.streak}-loss run — normal at ${fmtPct(+$('winRate').value/100,0)} wins — costs ${(d.dailyCap*d.streak*100).toFixed(1)}%, inside the ${(+$('maxdd').value).toFixed(1)}% floor.`);
+  }
+
+  // ================= game plan =================
+  function buildPlan(p, main, cmp, res){
+    const edge = p.winRate*p.R - (1-p.winRate);
+    const beWR = 1/(1+p.R);
+    const beR  = p.winRate>0 ? (1-p.winRate)/p.winRate : Infinity;
+    const targetWR = Math.min(0.9, beWR*1.25);
+    const targetR  = beR*1.25;
+    const s = journalStats();
+    const bankroll = +$('bankroll').value||0;
+    const card=$('planCard'); const steps=[];
+    let cls, verdict, headline;
+
+    // journal-driven override: recent form is bad
+    const coldStreak = s && s.n>=10 && s.recentExp<0;
+
+    if(edge<=0 && main.ev>0){
+      // Negative per-trade edge but positive EV: the fee caps the downside while a lucky run
+      // can still reach a payout. Real, but fragile and carried entirely by a small tail.
+      cls='plan-wait'; verdict='Marginal — only because your losses are capped';
+      headline=`You lose ${Math.abs(edge).toFixed(2)}R on every trade, yet the sim still shows ${fmt$(main.ev)} expected per eval. That is not an edge. It is the ${fmt$(p.cost)} fee capping your downside while the ${fmtPct(main.passProb)} of attempts that pass can still bank a payout before busting.`;
+      steps.push(`<strong>Only ${fmtPct(main.beatProb)} of attempts return more than the fee.</strong> The average is carried by a thin tail of lucky runs — most of the time you simply lose ${fmt$(p.cost)}.`);
+      steps.push(`<strong>This number is fragile.</strong> It assumes every trade is an independent coin flip with no tilt, no correlated losing streaks and no slippage. Shave a little off the win rate and it flips negative.`);
+      steps.push(`<strong>Fix the edge anyway.</strong> Breakeven at ${p.R.toFixed(1)}R is a ${fmtPct(beWR)} win rate; aim for <code>${fmtPct(targetWR)}</code>. Or hold ${fmtPct(p.winRate)} wins and push winners to <code>${targetR.toFixed(1)}R</code>.`);
+      steps.push(`<strong>Do not read this as a green light.</strong> A strategy that only profits because someone else caps your losses is one rule change away from worthless.`);
+    } else if(edge<=0){
+      cls='plan-stop'; verdict='Stop — don’t buy an eval';
+      headline=`At ${fmtPct(p.winRate)} wins and ${p.R.toFixed(1)}R you lose ${Math.abs(edge).toFixed(2)}R on every trade. No account size, plan or drawdown rule can fix a negative edge.`;
+      steps.push(`<strong>Fix the edge first.</strong> Two levers, either one works: lift the win rate to <code>${fmtPct(targetWR)}</code> at your current ${p.R.toFixed(1)}R, or hold ${fmtPct(p.winRate)} wins and push average winners to <code>${targetR.toFixed(1)}R</code>. Breakeven is exactly ${fmtPct(beWR)} / ${isFinite(beR)?beR.toFixed(1)+'R':'—'}; the targets add a cushion for fees and variance.`);
+      steps.push(`<strong>Prove it on 30+ trades</strong> in the Journal before any money goes in. A 10-trade hot run tells you nothing.`);
+      steps.push(`<strong>If winners keep getting cut short</strong>, that's an R problem, not a win-rate problem — it's usually the faster of the two to fix.`);
+      steps.push(`<strong>Cost of ignoring this:</strong> at ${fmt$(p.cost)} a go you'd expect to lose roughly <code>${fmt$(Math.abs(main.ev))}</code> per eval bought — and only ${fmtPct(main.beatProb)} of attempts return more than the fee.`);
+    } else if(main.ev<=0){
+      cls='plan-wait'; verdict='Not yet — edge is real but too thin';
+      headline=`You make ${edge.toFixed(2)}R per trade, but at these settings the fee and drawdown rules still eat it: ${fmt$(main.ev)} expected per eval.`;
+      const best = cheapestViable(cmp, +$('split').value===90?1:0);
+      if(best && best.ev>0){
+        steps.push(`<strong>A cheaper account already works.</strong> ${cap(best.plan)} at ${fmt$(best.size)} is <code>${fmt$(best.ev)}</code> per eval (${(best.roi*100).toFixed(0)}% on a ${fmt$(best.fee)} fee). Start there, not where you are now.`);
+      } else {
+        steps.push(`<strong>No account size is profitable yet</strong> at this edge. Lift the win rate toward <code>${fmtPct(targetWR)}</code> or R toward <code>${targetR.toFixed(1)}R</code> and re-check.`);
+      }
+      steps.push(`<strong>The binding constraint is the ${p.maxDD*100}% max drawdown</strong>, not the daily limit. At ${fmtPct(p.risk)} risk you have ${(p.maxDD/p.risk).toFixed(0)}R of room before the account dies — most failures happen in the first handful of trades, before your edge has time to show up.`);
+      steps.push(`<strong>Cutting risk per trade widens that buffer.</strong> Try ${(p.risk*100*0.6).toFixed(1)}% instead of ${fmtPct(p.risk)} — fewer busts, slower progress, usually better EV on tight-drawdown plans.`);
+    } else {
+      cls='plan-go'; verdict='Green light — your edge clears the fees';
+      headline=`${edge.toFixed(2)}R per trade turns into ${fmt$(main.ev)} expected per eval (${(main.ev/p.cost*100).toFixed(0)}% on the fee). Now it's a bankroll and discipline problem.`;
+      steps.push(`<strong>Expect to buy ${(1/main.passProb).toFixed(1)} evals per funded account</strong> — about <code>${fmt$(p.cost/main.passProb)}</code> in fees. Budget for the campaign, not for one lucky attempt.`);
+      steps.push(`<strong>Withdraw early and often.</strong> Median funded account gets ${main.medCycles} payout${main.medCycles===1?'':'s'}; money you haven't taken out is money the drawdown rules can still take back.`);
+      steps.push(`<strong>Keep risk at ${fmtPct(p.risk)} of the starting balance</strong> even as the account grows. Scaling risk with equity puts the static floor back in play and is the most common way funded accounts die.`);
+      if(+$('split').value===80){
+        const feeUp = FEES[$('plan').value] && FEES[$('plan').value][$('acct').value];
+        if(feeUp) steps.push(`<strong>The 90/10 upgrade costs ${fmt$(feeUp[1]-feeUp[0])} more</strong> and lifts every payout by 12.5%. Worth it once you're consistently reaching payouts, not before.`);
+      }
+    }
+
+    if(coldStreak){
+      steps.unshift(`<strong>Your last ${s.recentN} logged trades average ${s.recentExp.toFixed(2)}R</strong> — you're in a cold run right now. Whatever the long-run maths says, size down or stop until that turns positive.`);
+    }
+    if(s && s.streak<=-4){
+      steps.unshift(`<strong>${Math.abs(s.streak)} losses in a row.</strong> Take a day off before the next entry — tilt costs more than variance.`);
+    }
+
+    card.className='card '+cls;
+    $('planVerdict').textContent=verdict;
+    $('planHeadline').innerHTML=headline;
+    $('planSteps').innerHTML=steps.map(t=>`<li>${t}</li>`).join('');
+  }
+  const cap = s => s.charAt(0).toUpperCase()+s.slice(1);
+
+  // Bankroll needed to responsibly play a rung. Two guards, take the stricter:
+  //  1. enough fees to cover the attempts you need with 95% confidence, not just the average
+  //  2. no single fee larger than 20% of the bankroll — one bad run must never be fatal
+  function bankrollNeed(fee, pass){
+    if(!(pass>0)) return Infinity;
+    const attempts95 = pass>=1 ? 1 : Math.ceil(Math.log(0.05)/Math.log(1-pass));
+    return Math.max(attempts95*fee, fee*5);
+  }
+
+  function rankOptions(cmp, splitIdx){
+    const splitF = +$('split').value/100;
+    const out=[];
+    for(const k of PLAN_KEYS){
+      for(const sz of SIZES){
+        const feeArr = FEES[k][sz]; if(!feeArr) continue;
+        const fee = feeArr[splitIdx];
+        const pass = cmp[k].passProb;
+        const ev = pass*cmp[k].avgPaid*splitF*sz - fee;
+        out.push({plan:k, size:sz, fee, ev, roi:ev/fee, pass, need:bankrollNeed(fee,pass)});
+      }
+    }
+    return out;
+  }
+
+  // The size to actually trade: most expected profit among the rungs the bankroll safely covers.
+  // Ranking on return-on-fee would be wrong here — fees scale almost exactly with account size,
+  // so ROI barely moves and the tie would always fall to the smallest account.
+  function bestOption(cmp, splitIdx, p, bankroll){
+    const opts = rankOptions(cmp, splitIdx)
+      .filter(o=>o.ev>0 && (bankroll==null || o.need<=bankroll));
+    if(!opts.length) return null;
+    opts.sort((a,b)=> b.ev-a.ev || b.size-a.size);
+    return opts[0];
+  }
+
+  // The rung to aim for when nothing is affordable yet — the one needing the smallest bankroll.
+  function cheapestViable(cmp, splitIdx){
+    const opts = rankOptions(cmp, splitIdx).filter(o=>o.ev>0);
+    if(!opts.length) return null;
+    opts.sort((a,b)=> a.need-b.need || a.fee-b.fee);
+    return opts[0];
+  }
+
+  // The ladder is ALWAYS for one fixed plan — the one you're actually trading.
+  // It must not switch plans as the bankroll changes: if it did, every "needs" figure would
+  // move while you were saving toward it, so the target you were aiming at would never arrive.
+  // Which plan is best overall is a separate question, answered by the comparison table below.
+  function renderLadder(cmp, p){
+    const splitIdx = +$('split').value===90?1:0;
+    const splitF = +$('split').value/100;
+    const bankroll = +$('bankroll').value||0;
+    const s = journalStats();
+    const edge = p.winRate*p.R - (1-p.winRate);
+
+    const a = activeAccount();
+    const sel = a ? a.plan : $('plan').value;
+
+    // A paper account buys nothing, so there is no bankroll to ladder.
+    if(isPaper(sel)){
+      $('ladderPlan').innerHTML = `Paper account <em>· no fees, nothing to stake</em>`;
+      $('ladderSub').textContent = 'Paper trading costs nothing, so there is no ladder to climb. Log trades against it until your journal shows a real edge, then switch the plan above to see which account your bankroll can fund.';
+      $('ladder').innerHTML='';
+      const st2=journalStats();
+      $('ladderSteps').innerHTML = st2
+        ? `<li><strong>${st2.n} trade${st2.n===1?'':'s'} logged, expectancy ${(st2.expR>=0?'+':'')+st2.expR.toFixed(3)}R.</strong> ${st2.n<30 ? 'Get to 30+ before reading anything into it.' : (st2.expR>0 ? 'Positive over a real sample — switch to a live plan to size the bankroll.' : 'Still negative. Keep it on paper.')}</li>`
+        : '<li><strong>No trades logged yet.</strong> Size them on the Pre-Trade Check and log them here — commissions and financing are applied exactly as they would be on a funded account.</li>';
+      return;
+    }
+
+    const planK = PLANS[sel] && cmp[sel] ? sel : 'classic';
+    const pass = cmp[planK].passProb;
+
+    // Every rung's requirement depends only on the plan's fee and pass rate — never the bankroll.
+    const rungs = SIZES.filter(sz=>FEES[planK][sz]).map(sz=>{
+      const fee = FEES[planK][sz][splitIdx];
+      const ev = pass*cmp[planK].avgPaid*splitF*sz - fee;
+      return {sz, fee, ev, roi: ev/fee, need: bankrollNeed(fee, pass), pass};
+    });
+    const affordable = [...rungs].reverse().find(r=>r.ev>0 && r.need<=bankroll) || null;
+    const cheapest = rungs.find(r=>r.ev>0) || null;
+
+    const coldStreak = s && s.n>=10 && s.recentExp<0;
+    const paused = coldStreak || edge<=0;
+    const curSize = (!paused && affordable) ? affordable.sz : null;
+
+    $('ladderPlan').innerHTML = `${cap(planK)} ladder — ${fmtPct(pass,0)} pass rate`+
+      (a ? ` <em>· your ${esc(a.label)} account</em>` : ` <em>· from the plan selected above</em>`);
+
+    $('ladder').innerHTML = SIZES.map(sz=>{
+      const r = rungs.find(x=>x.sz===sz);
+      if(!r) return `<div class="rung">${fmt$(sz)}<small>not offered</small></div>`;
+      const isCur = sz===curSize;
+      const ok = bankroll>=r.need && r.ev>0;
+      return `<div class="rung ${isCur?'cur':(ok?'ok':'')}">${fmt$(sz)}`+
+             `<small>${isCur?'you are here':'needs '+fmt$(r.need)}</small></div>`;
+    }).join('');
+
+    const steps=[];
+    // A better plan is worth mentioning, but it never rearranges this ladder.
+    const bestAnywhere = bestOption(cmp, splitIdx, p, bankroll);
+    if(bestAnywhere && bestAnywhere.plan!==planK && affordable && bestAnywhere.ev>affordable.ev*1.15){
+      steps.push(`<strong>Worth knowing:</strong> ${cap(bestAnywhere.plan)} ${fmt$(bestAnywhere.size)} would return <code>${fmt$(bestAnywhere.ev)}</code> per eval against this rung's <code>${fmt$(affordable.ev)}</code>. Switch plan above if you want that ladder instead — this one stays ${cap(planK)}.`);
+    }
+
+    if(edge<=0){
+      $('ladderSub').textContent='Ladder paused — with a negative edge every rung loses money. Nothing to size up or down into.';
+      steps.push('<strong>Rung 0: paper or micro only.</strong> Rejoin the ladder once 30+ logged trades show positive expectancy.');
+    } else if(coldStreak){
+      $('ladderSub').textContent=`Ladder paused — your recent form (${s.recentExp.toFixed(2)}R over the last ${s.recentN} trades) says step off, not step up.`;
+      steps.push(`<strong>Drop to the cheapest rung</strong> (${fmt$(rungs[0].sz)}, ${fmt$(rungs[0].fee)}) or stop buying until the rolling average turns positive.`);
+      steps.push('<strong>Never re-buy a bigger account to win back a loss.</strong> That is the single fastest way to spend a bankroll.');
+    } else if(!affordable){
+      $('ladderSub').textContent = cheapest
+        ? `Your ${fmt$(bankroll)} doesn't yet cover a full campaign at any ${cap(planK)} size.`
+        : `No ${cap(planK)} rung is profitable at this edge yet.`;
+      if(cheapest) steps.push(`<strong>First rung is ${fmt$(cheapest.sz)}</strong> at ${fmt$(cheapest.fee)} a go — you need <code>${fmt$(cheapest.need)}</code> set aside, ${Math.ceil(cheapest.need/cheapest.fee)} attempts' worth. That figure does not move as you save toward it.`);
+      steps.push('<strong>Build the bankroll first.</strong> Buying an eval you can only afford once turns a positive-EV bet into a coin flip you can’t repeat.');
+    } else {
+      $('ladderSub').textContent=`With ${fmt$(bankroll)} set aside, ${fmt$(affordable.sz)} is the biggest ${cap(planK)} rung you can properly fund — no single fee over a fifth of the bankroll, and enough left to survive a bad run.`;
+      steps.push(`<strong>Trade here now:</strong> ${cap(planK)} ${fmt$(affordable.sz)}, ${fmt$(affordable.fee)} per attempt, <code>${fmt$(affordable.ev)}</code> expected each. Expect ~${(1/pass).toFixed(1)} attempts per pass.`);
+      const next = rungs[rungs.indexOf(affordable)+1];
+      if(next){
+        steps.push(`<strong>Next rung, ${fmt$(next.sz)}, unlocks at <code>${fmt$(next.need)}</code>.</strong> That target is fixed — it will still be ${fmt$(next.need)} when you get there. One rung at a time, and only from banked payouts, never from savings topped up to chase a size.`);
+      } else {
+        steps.push(`<strong>You are on the top ${cap(planK)} rung.</strong> Further profit should come out as payouts, not bigger accounts.`);
+      }
+      const prev = rungs[rungs.indexOf(affordable)-1];
+      steps.push(`<strong>Step down to ${prev? fmt$(prev.sz) : 'paper trading'} when</strong> either happens: the bankroll falls under <code>${fmt$(affordable.need)}</code>, or your rolling 20-trade average goes negative. Stepping down is what keeps a bad run from becoming a blown bankroll.`);
+      steps.push(`<strong>Hard stop:</strong> if the bankroll halves from its peak, stop buying entirely and go back to the Journal for 30 trades. No exceptions, no "one more".`);
+    }
+    $('ladderSteps').innerHTML=steps.map(t=>`<li>${t}</li>`).join('');
+  }
+  // ================= dashboard render =================
+  function renderMain(res, p){
+    const edge = p.winRate*p.R - (1-p.winRate);
+    $('evLabel').textContent = isPaper($('plan').value)
+      ? 'Expected payout per attempt (paper — no fee)'
+      : 'Expected profit per eval purchased';
+    const evEl = $('evPerEval');
+    evEl.textContent = fmt$(res.ev);
+    // amber, not green, when a positive EV rests on a losing strategy — that is not a green light
+    evEl.className = 'ev ' + (res.ev<0 ? 'neg' : (edge<=0 ? 'warn' : 'pos'));
+    const roi = p.cost? res.ev/p.cost : 0;
+    $('roi').textContent = (roi>=0?'+':'') + (roi*100).toFixed(0)+'%';
+    $('roi').className = 'v ' + (roi<0 ? 'neg' : (edge<=0 ? 'warn' : 'pos'));
+    $('passRate').textContent = fmtPct(res.passProb);
+    $('edgeR').textContent = (edge>=0?'+':'') + edge.toFixed(2)+'R';
+    $('edgeR').className = 'v ' + (edge>=0?'pos':'neg');
+
+    const ruinProb = (res.daily+res.maxdd)/res.n;
+    $('ruin').textContent = fmtPct(ruinProb);
+    $('ruin').className = 'v ' + (ruinProb>0.5 ? 'neg' : '');
+    $('ruinFunded').textContent = 'funded busts pre-payout: ' + fmtPct(res.fundedNoPayout,0);
+
+    const att = res.passProb? 1/res.passProb : Infinity;
+    $('attempts').textContent = isFinite(att)? att.toFixed(1) : '∞';
+    $('attemptsCost').textContent = isFinite(att)? fmt$(att*p.cost)+' in fees' : 'never passes';
+    $('avgPayout').textContent = fmt$(res.avgPaid*p.acct);
+    $('avgCycles').textContent = 'median '+res.medCycles+' payout'+(res.medCycles===1?'':'s')+' · mean '+res.avgCycles.toFixed(1);
+    $('beatCost').textContent = fmtPct(res.beatProb);
+    $('avgTrades').textContent = Math.round(res.avgTrades).toLocaleString();
+    $('avgDays').textContent = '≈ '+Math.ceil(res.avgTrades/p.tpw).toLocaleString()+' weeks at your pace';
+
+    const parts = [
+      {k:'Passed', v:res.pass, c:'var(--good)'},
+      {k:'Daily loss bust', v:res.daily, c:'var(--seg-daily)'},
+      {k:'Max drawdown bust', v:res.maxdd, c:'var(--seg-max)'},
+      {k:'Unresolved (cap)', v:res.unres, c:'var(--muted)'}
+    ].filter(x=>x.v>0);
+    $('obar').innerHTML = parts.map(x=>`<div style="flex-grow:${x.v};background:${x.c}" title="${x.k}: ${fmtPct(x.v/res.n)}"></div>`).join('');
+    $('oleg').innerHTML = parts.map(x=>`<span><i style="background:${x.c}"></i>${x.k} <b>${fmtPct(x.v/res.n)}</b></span>`).join('');
+
+    const labels=['0','1','2','3–5','6+'];
+    const tot=res.nFunded||1;
+    const mx=Math.max(...res.buckets,1);
+    $('payoutSub').textContent = res.nFunded
+      ? `Of ${res.nFunded.toLocaleString()} simulated accounts that reached funded status — median ${res.medCycles}, mean ${res.avgCycles.toFixed(1)}. The mean sits above the median because a few long survivors stretch the tail.`
+      : 'No simulated attempt reached funded status at these settings.';
+    $('dist').innerHTML = res.buckets.map((b,i)=>{
+      const share=b/tot, h=Math.max(3, Math.round(share/(mx/tot)*74));
+      return `<div class="col${i===0?' zero':''}"><span class="pc">${fmtPct(share,0)}</span>`+
+             `<div class="bar" style="height:${h}px"></div>`+
+             `<span class="cap">${labels[i]} payout${labels[i]==='1'?'':'s'}</span></div>`;
+    }).join('');
+
+    // How many evals you get through is not a choice — it falls out of how fast you trade and
+    // how quickly each attempt resolves (pass or bust). You buy the next one when you breach.
+    const tradesPerMonth = p.tpw*4.345;
+    const evalsPM = res.avgTrades>0 ? tradesPerMonth/res.avgTrades : 0;
+    const months = 12;
+    $('planLine').textContent =
+      `At ${p.tpw} trade${p.tpw===1?'':'s'} a week, an attempt resolves in about ${Math.round(res.avgTrades)} trades — `+
+      `so you get through roughly ${evalsPM.toFixed(1)} eval${evalsPM.toFixed(1)==='1.0'?'':'s'} a month at ${fmt$(p.cost)} each `+
+      `on a ${fmt$(p.acct)} ${$('plan').options[$('plan').selectedIndex].text} account.`;
+    const horizons = [1,3,6,12];
+    const perEvalPayout = res.passProb*res.avgPaid*p.acct;
+    $('projTable').querySelector('tbody').innerHTML = horizons.map(m=>{
+      const nEv = evalsPM*m, spend = nEv*p.cost, pay = nEv*perEvalPayout, net = pay-spend;
+      return `<tr><td>${m} month${m===1?'':'s'}</td><td>${nEv.toLocaleString(undefined,{maximumFractionDigits:1})}</td><td>${fmt$(spend)}</td><td>${fmt$(pay)}</td><td class="${net>=0?'pos':'neg'}">${fmt$(net)}</td></tr>`;
+    }).join('');
+  }
+
+  // One answer, not a matrix. Eighteen cells make you do the choosing; the inputs already
+  // determine it. The pick is the highest expected profit among the rungs the money set aside
+  // actually covers — never the biggest EV on the board, because an account you cannot fund
+  // twice is one bad run from over.
+  function renderRecommendation(cmp, p){
+    const splitIdx = +$('split').value===90?1:0;
+    const bankroll = +$('bankroll').value||0;
+    const all = rankOptions(cmp, splitIdx);
+    const positive = all.filter(o=>o.ev>0).sort((a,b)=> b.ev-a.ev || b.size-a.size);
+    const box=$('recPick'), why=$('recWhy');
+    const label = o => cap(o.plan)+' '+fmt$(o.size);
+    const stat = (k,v) => '<div><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';
+
+    // nothing on the board is worth buying at these stats
+    if(!positive.length){
+      box.className='recpick cold';
+      $('recName').textContent='None of them';
+      $('recStats').innerHTML='';
+      $('recSub').textContent='At your current numbers every plan and size loses money on the fee.';
+      const beR = p.winRate>0 ? (1-p.winRate)/p.winRate : Infinity;
+      const beW = 1/(1+p.R);
+      why.innerHTML=
+        '<li>Every account has negative expectancy once the eval fee is counted, so buying one is paying to play.</li>'+
+        '<li>At '+p.R.toFixed(1)+'R you need <b>'+fmtPct(beW)+'</b> wins to break even; you have '+fmtPct(p.winRate)+'.'+
+        ' At '+fmtPct(p.winRate)+' wins you need <b>'+(isFinite(beR)?beR.toFixed(2)+'R':'—')+'</b>; you have '+p.R.toFixed(1)+'R.</li>'+
+        '<li>Trade the paper account until the journal clears one of those, then come back.</li>';
+      return;
+    }
+
+    const best = positive[0];
+    const pick = positive.find(o=>o.need<=bankroll) || null;
+    const cheapest = [...positive].sort((a,b)=> a.need-b.need || a.fee-b.fee)[0];
+
+    // the money set aside does not yet fund anything safely
+    if(!pick){
+      box.className='recpick wait';
+      $('recName').textContent=label(cheapest);
+      $('recStats').innerHTML =
+        stat('Fee', fmt$(cheapest.fee)) + stat('Pass rate', fmtPct(cheapest.pass,0)) +
+        stat('EV per eval', fmt$(cheapest.ev)) + stat('Bankroll needed', fmt$(cheapest.need));
+      $('recSub').textContent='Not yet — this is the one to save for.';
+      why.innerHTML=
+        '<li><b>'+fmt$(bankroll)+' set aside is short of the '+fmt$(cheapest.need)+' this needs.</b> '+
+          'That figure is '+Math.ceil(Math.log(0.05)/Math.log(1-cheapest.pass))+' attempts at '+fmtPct(cheapest.pass,0)+
+          ' pass — the run you would hit 1 time in 20 — and never lets one fee exceed a fifth of the pot.</li>'+
+        '<li>Buying it on '+fmt$(bankroll)+' is not wrong on expectancy, it is wrong on ruin: two bad evals and you are out with nothing to try again with.</li>'+
+        '<li>Set aside <b>'+fmt$(cheapest.need-bankroll)+' more</b>, or rehearse on the paper account until then.</li>';
+      return;
+    }
+
+    box.className='recpick';
+    $('recName').textContent=label(pick);
+    $('recStats').innerHTML =
+      stat('Fee', fmt$(pick.fee)) + stat('Pass rate', fmtPct(pick.pass,0)) +
+      stat('EV per eval', fmt$(pick.ev)) + stat('Bankroll needed', fmt$(pick.need));
+    $('recSub').textContent =
+      'From your '+fmtPct(p.winRate)+' win rate at '+p.R.toFixed(1)+'R, '+(+$('split').value)+'/'+(100-+$('split').value)+
+      ' split, and the '+fmt$(bankroll)+' you have set aside for fees.';
+
+    const bits=[];
+    bits.push('<li><b>'+fmt$(bankroll)+' covers it.</b> It needs '+fmt$(pick.need)+' — '+
+      Math.ceil(Math.log(0.05)/Math.log(1-pick.pass))+' attempts at '+fmtPct(pick.pass,0)+
+      ' pass, the run you would hit 1 time in 20, with no single '+fmt$(pick.fee)+' fee over a fifth of the pot.</li>');
+
+    // Why this plan and not the others at the same size. It may be winning on expectancy, or it
+    // may simply be the one the bankroll reaches — those are different arguments, so make it clear.
+    const rival = all.filter(o=>o.size===pick.size && o.plan!==pick.plan && o.ev>0)
+                     .sort((a,b)=>b.ev-a.ev)[0];
+    const sameRisk = cmp[pick.plan].risk!=null ? (cmp[pick.plan].risk*100).toFixed(2)+'%' : 'the same size';
+    if(rival && rival.ev>pick.ev){
+      bits.push('<li><b>'+cap(rival.plan)+' '+fmt$(rival.size)+' is worth more — '+fmt$(rival.ev)+' — but wants '+
+        fmt$(rival.need)+' behind it.</b> Its '+PLANS[rival.plan].maxdd+'% floor passes more often than '+
+        cap(pick.plan)+"'s "+PLANS[pick.plan].maxdd+'%, which is exactly why its bankroll bar is higher. '+
+        'This is the most you can fund without one bad run ending it.</li>');
+    } else if(rival){
+      bits.push('<li><b>'+cap(pick.plan)+' beats '+cap(rival.plan)+' at this size:</b> '+
+        fmt$(pick.ev)+' against '+fmt$(rival.ev)+'. All three cap daily loss at 3%, so you trade '+sameRisk+
+        ' either way — what differs is the drawdown floor you survive inside ('+
+        PLANS[pick.plan].maxdd+'% vs '+PLANS[rival.plan].maxdd+'%) and the target you must clear ('+
+        PLANS[pick.plan].target+'% vs '+PLANS[rival.plan].target+'%).</li>');
+    }
+
+    // the next rung, and what it would take
+    const bigger = positive.filter(o=>o.need>bankroll && o.ev>pick.ev).sort((a,b)=>a.need-b.need)[0];
+    if(bigger){
+      bits.push('<li><b>Next step up: '+label(bigger)+'</b> at '+fmt$(bigger.ev)+' expected. '+
+        'Set aside '+fmt$(bigger.need-bankroll)+' more and it becomes the right buy.</li>');
+    } else if(best.ev>pick.ev && best.need>bankroll){
+      bits.push('<li>The biggest number on the board is '+label(best)+' at '+fmt$(best.ev)+
+        ', but it wants '+fmt$(best.need)+' behind it. Not yet.</li>');
+    } else {
+      bits.push('<li>This is the largest account your bankroll safely supports — going bigger adds ruin risk faster than it adds profit.</li>');
+    }
+
+    if(isPaper($('plan').value)){
+      bits.push('<li>You are on the paper account, so nothing is being spent. This is the challenge to buy once the journal shows the edge is real.</li>');
+    }
+    why.innerHTML=bits.join('');
+  }
+
+  // ---------- sweep chart ----------
+  let sweepData=null, chartGeom=null;
+  function renderChart(points, cur){
+    sweepData = points;
+    const W=760, H=260, mL=64, mR=16, mT=14, mB=30;
+    const xs = points.map(d=>d.w), ys = points.map(d=>d.ev).concat([cur.ev,0]);
+    const xMin=Math.min(...xs), xMax=Math.max(...xs);
+    let yMin=Math.min(...ys), yMax=Math.max(...ys);
+    if(yMax===yMin){yMax+=1;yMin-=1}
+    const pad=(yMax-yMin)*0.12; yMin-=pad; yMax+=pad;
+    const X=w=>mL+(w-xMin)/(xMax-xMin)*(W-mL-mR);
+    const Y=v=>mT+(yMax-v)/(yMax-yMin)*(H-mT-mB);
+    chartGeom={X,Y,xMin,xMax};
+    let s='';
+    for(let i=0;i<=4;i++){
+      const v=yMin+(yMax-yMin)*i/4, y=Y(v);
+      s+=`<line x1="${mL}" y1="${y}" x2="${W-mR}" y2="${y}" stroke="var(--grid)" stroke-width="1"/>`;
+      s+=`<text x="${mL-8}" y="${y+4}" text-anchor="end">${fmt$(v)}</text>`;
+    }
+    if(yMin<0&&yMax>0) s+=`<line x1="${mL}" y1="${Y(0)}" x2="${W-mR}" y2="${Y(0)}" stroke="var(--axis)" stroke-width="1.5"/>`;
+    points.forEach((d,i)=>{ if(i%5===0||i===points.length-1)
+      s+=`<text x="${X(d.w)}" y="${H-8}" text-anchor="middle">${d.w.toFixed(0)}%</text>`; });
+    s+=`<path d="${points.map((d,i)=>(i?'L':'M')+X(d.w).toFixed(1)+' '+Y(d.ev).toFixed(1)).join(' ')}" fill="none" stroke="var(--line)" stroke-width="2" stroke-linejoin="round"/>`;
+    s+=`<circle cx="${X(cur.w)}" cy="${Y(cur.ev)}" r="5.5" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/>`;
+    s+=`<line id="xh" x1="0" y1="${mT}" x2="0" y2="${H-mB}" stroke="var(--axis)" stroke-width="1" opacity="0"/>`;
+    s+=`<circle id="hpt" r="4" fill="var(--line)" stroke="var(--surface)" stroke-width="2" opacity="0"/>`;
+    s+=`<rect x="${mL}" y="${mT}" width="${W-mL-mR}" height="${H-mT-mB}" fill="transparent" id="hit"/>`;
+    $('chart').innerHTML=s;
+    const svg=$('chart'), tip=$('tip'), hit=svg.querySelector('#hit');
+    hit.addEventListener('mousemove',ev=>{
+      if(!sweepData) return;
+      const r=svg.getBoundingClientRect();
+      const px=(ev.clientX-r.left)/r.width*W;
+      const w=chartGeom.xMin+(px-mL)/(W-mL-mR)*(chartGeom.xMax-chartGeom.xMin);
+      let best=sweepData[0];
+      for(const d of sweepData) if(Math.abs(d.w-w)<Math.abs(best.w-w)) best=d;
+      const cx=X(best.w), cy=Y(best.ev);
+      svg.querySelector('#xh').setAttribute('x1',cx); svg.querySelector('#xh').setAttribute('x2',cx);
+      svg.querySelector('#xh').setAttribute('opacity','1');
+      const hp=svg.querySelector('#hpt'); hp.setAttribute('cx',cx); hp.setAttribute('cy',cy); hp.setAttribute('opacity','1');
+      // the tip is positioned against .chartbox, so offset by where the svg sits inside it
+      const box=svg.closest('.chartbox').getBoundingClientRect();
+      tip.style.display='block';
+      tip.style.left=(r.left-box.left + cx/W*r.width)+'px';
+      tip.style.top=(r.top-box.top + cy/H*r.height)+'px';
+      tip.textContent=`${best.w.toFixed(1)}% win → ${fmt$(best.ev)}/eval`;
+    });
+    hit.addEventListener('mouseleave',()=>{ tip.style.display='none';
+      svg.querySelector('#xh').setAttribute('opacity','0'); svg.querySelector('#hpt').setAttribute('opacity','0'); });
+  }
+
+  // ================= pre-trade checker =================
+  function finRate(){
+    const hold = Math.max(0, +$('cHold').value||0);
+    return $('cPlat').value==='bo'
+      ? FIN_BLOCK * Math.ceil(hold/4)      // Breakout Terminal: charged every 4 hours
+      : FIN_DAILY * Math.ceil(hold/24);    // DXtrade: charged once a day at 0025 UTC
+  }
+
+  function checkerState(){
+    const rules = checkerRules();
+    const p = Object.assign(readParams(), {
+      acct: rules.size, target: rules.target, maxDD: rules.maxDD, dailyDD: rules.dailyDD
+    });
+    const dayStart = +$('cDayStart').value||0;
+    const todayPL  = +$('cToday').value||0;
+    const floatPL  = +$('cFloat').value||0;
+    const openRisk = +$('cOpen').value||0;
+    const equity   = dayStart + todayPL + floatPL;
+    const dailyLimit = dayStart*(1-p.dailyDD);       // fixed for 24h from the 0030 UTC balance
+    const ddFloor    = p.acct*(1-p.maxDD);           // static, from the starting balance
+    const dailyRoom  = equity - dailyLimit;
+    const ddRoom     = equity - ddFloor;
+    const room       = Math.max(0, Math.min(dailyRoom, ddRoom) - openRisk);
+    return {p, rules, dayStart, todayPL, floatPL, openRisk, equity, dailyLimit, ddFloor, dailyRoom, ddRoom, room};
+  }
+
+  // Breakout's day rolls at 00:30 UTC — not at your local midnight and not at UTC midnight — so
+  // that is the boundary the daily loss limit counts against. Every date in this file is stamped
+  // on this one clock; mixing a local close date with a UTC "today" mis-dated trades by a whole
+  // day for the ten hours a day the two calendars disagree.
+  const DAY_ROLL_MIN = 30;
+  function tradingDay(ms){
+    return new Date((ms==null?Date.now():ms) - DAY_ROLL_MIN*60000).toISOString().slice(0,10);
+  }
+  // Which trades are already logged today ON THE ACCOUNT BEING CHECKED. Each account carries its
+  // own daily loss limit and its own drawdown floor, so a trade taken on another account must not
+  // consume a slot here. Returns the trades themselves so the rule check can name them — an
+  // unexplained count is impossible to argue with when it looks wrong.
+  function tradesTodayList(){
+    const d=tradingDay();
+    return journal.filter(t=>(t.date===d || t.dateClosed===d) && jAcct(t)===activeAcctId);
+  }
+  const tradesToday = () => tradesTodayList().length;
+  function describeTrade(t){
+    const when = t.opened ? new Date(t.opened).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}) : '';
+    return (t.sym||'trade')+' '+(t.dir==='short'?'short':'long')+(when?' '+when:'')+
+           (t.status==='open' ? ' (open)' : ' ('+fmt$2(+t.pl||0)+')');
+  }
+
+  function budgetPlan(st){
+    const n = Math.max(1, Math.round(+$('cMaxTrades').value||1));
+    const usePct = Math.min(1, Math.max(0.1, (+$('cUsePct').value||85)/100));
+    const margin = 1-usePct;
+    // the whole day's allowance, fixed from the 00:30 balance — never recalculated upward
+    const allowance = st.dayStart * st.p.dailyDD;
+    const usable = allowance * usePct;   // spend at your stops, fees included; the rest covers slippage
+    const slice = usable / n;
+    const taken = tradesToday();
+    const left = Math.max(0, n-taken);
+    // What today has already cost, from every source — not just journal-logged trades.
+    // Without this the "breach impossible" claim is circular: it would only ever compare the
+    // budget against itself and stay true no matter how much had already been lost.
+    const spent = Math.max(0, -st.todayPL);
+    const remaining = Math.max(0, usable - spent);
+    // Equal same-sized trades out of the day's budget — that is the whole rule. The only thing
+    // that shrinks a trade is the day having already overspent, which is arithmetic, not a
+    // second opinion. A losing streak against the static floor is raised as a warning instead.
+    const w = st.p.winRate;
+    const streak = (w>0 && w<1) ? Math.ceil(Math.log(0.05)/Math.log(1-w)) : 1;
+    const perTrade = left>0 ? Math.min(slice, remaining/left) : 0;
+    const ddFloorRoom = st.p.acct*st.p.maxDD;
+    return {n, margin, usePct, allowance, usable, slice, streak, perTrade, taken, spent, remaining, left,
+            lossesToBreach: perTrade>0 ? Math.ceil(ddFloorRoom/perTrade) : Infinity,
+            streakBreaches: perTrade*streak > ddFloorRoom,
+            worstCase: spent + perTrade*left};
+  }
+
+  function strategyRisk(st){
+    const mode=$('cStrat').value;
+    let risk, why;
+    if(mode==='budget'){
+      const b=budgetPlan(st);
+      risk = b.perTrade;
+      why = b.spent>0
+        ? `Trimmed to ${fmt$2(b.perTrade)}: today has already cost ${fmt$2(b.spent)}, leaving ${fmt$2(b.remaining)} of budget across ${b.left} remaining trade${b.left===1?'':'s'}.`
+        : `${(b.usePct*100).toFixed(0)}% of the ${fmt$(b.allowance)} daily allowance split across ${b.n} equal trade${b.n===1?'':'s'}, commissions and financing included. ${fmt$2(b.allowance-b.usable)} held back as the ${(b.margin*100).toFixed(0)}% buffer for bad fills.`;
+    } else if(mode==='flat'){
+      const pct=+$('cFlatPct').value/100;
+      risk = st.dayStart*pct;
+      why = `${(pct*100).toFixed(2)}% of your ${fmt$(st.dayStart)} balance.`;
+    } else {
+      risk = +$('cRisk').value||0;
+      why = 'Your own figure.';
+    }
+    const capped = Math.min(risk, st.room*0.95);
+    return {risk: Math.max(0,capped), why, capped: capped<risk-0.005, mode};
+  }
+
+  let lastPlanned=null;
+
+  function renderChecker(){
+    const st = checkerState(), p = st.p;
+    const entry=+$('cEntry').value||0, stop=+$('cStop').value||0, tgt=+$('cTarget').value||0;
+    const sym=$('cSym').value, symInfo=SYMBOLS[sym]||[Infinity,1];
+    const stopDist=Math.abs(entry-stop);
+    const fin=finRate();
+    const sr=strategyRisk(st);
+    const risk=sr.risk;
+
+    const paperNow = isPaper(st.rules.plan);
+    $('cContext').innerHTML =
+      (paperNow ? `<span class="paperbadge">PAPER</span> ` : '')+
+      `<strong>${esc(st.rules.label || st.rules.planName+' · '+fmt$(p.acct))}</strong> — `+
+      `${st.rules.planName} ${fmt$(p.acct)} · ${(p.dailyDD*100).toFixed(1)}% daily loss, `+
+      `${(p.maxDD*100).toFixed(1)}% static max drawdown, ${(p.target*100).toFixed(1)}% profit target.`+
+      (paperNow ? ' No money at risk — but commissions, financing and every drawdown rule are applied exactly as they would be live.' : '')+
+      (st.rules.label ? '' : ' No account selected, so this is using the Dashboard settings.');
+
+    // Sized so a stop that fills WHERE YOU PUT IT costs exactly `risk`, commissions and financing
+    // included. Slippage is deliberately NOT sized in — the 15% held back from the daily
+    // allowance is the slippage provision, and charging for it here as well would shrink every
+    // position to cover a cost that is already provisioned for once.
+    const bps = slipTable(sym)[$('cCond').value];
+    const slipPrice = entry*bps/10000;
+    const costPerUnit = COMMISSION*entry + COMMISSION*stop + fin*entry;
+    const lossPerUnit = stopDist + costPerUnit;
+    const units = lossPerUnit>0 ? risk/lossPerUnit : 0;
+    const cleanLoss = units*lossPerUnit;                       // equals risk, by construction
+    const slippedStop = stop + (stop>entry ? slipPrice : -slipPrice);
+    const slipCost = units*slipPrice;                          // the extra, drawn from the buffer
+    const slip = stopDist>0 ? slipPrice/stopDist : 0;          // kept only for reporting
+    const notional = units*entry;
+    const entryFee = units*entry*COMMISSION;
+    {
+      const bb = sr.mode==='budget' ? budgetPlan(st) : null;
+      const buffer = bb ? bb.allowance-bb.usable : 0;
+      $('cSlipHint').innerHTML = !(stopDist>0)
+        ? 'Set an entry and stop to estimate slippage.'
+        : `Price gap: <strong>${bps} bps</strong> (${(bps/100).toFixed(2)}% of price) = <strong>${fmt$2(slipPrice)}</strong> past your stop.<br>`+
+          `On this size that is <strong>${fmt$2(slipCost)}</strong> extra if you get stopped — `+
+          (buffer>0
+            ? `paid out of the ${fmt$2(buffer)} buffer, not your risk. The buffer covers <strong>${Math.floor(buffer/Math.max(slipCost,0.01))}</strong> such fill${Math.floor(buffer/Math.max(slipCost,0.01))===1?'':'s'}.`
+            : 'not sized into the position.')+
+          (buffer>0 && slipCost*Math.max(1,(bb?bb.left:1))>buffer
+            ? '<br><span style="color:var(--warn)">Every remaining stop slipping this far would outrun the buffer — widen the stop or hold back more of the limit.</span>' : '');
+    }
+    const exitFeeStop = units*stop*COMMISSION;   // matches the price the sizing assumes
+    const finFee = units*entry*fin;
+    const totalCostStop = entryFee+exitFeeStop+finFee;
+
+    // Financing is charged on notional, but risk is only the stop distance — so the daily bleed
+    // measured against your risk is FIN_DAILY / (stop as a % of price). Tight stops bleed fastest.
+    const stopPct = entry>0 ? stopDist/entry : 0;
+    const bleedPerDay = stopPct>0 ? FIN_DAILY/stopPct : 0;   // as a fraction of risk, per day
+    const finShare = risk>0 ? finFee/risk : 0;
+    const holdH2 = Math.max(0,+$('cHold').value||0);
+    const closeBy = new Date(Date.now()+holdH2*3600*1000);
+    $('cFinHint').innerHTML = stopPct>0
+      ? `Holding costs <strong>${(bleedPerDay*100).toFixed(1)}% of your risk per day</strong> `+
+        `(${(FIN_DAILY*100).toFixed(3)}% of notional ÷ your ${(stopPct*100).toFixed(2)}% stop). `+
+        `Budgeted for ${holdH2}h = <strong>${fmt$2(finFee)}</strong>, ${(finShare*100).toFixed(1)}% of risk — `+
+        `so close or re-size by <strong>${closeBy.toLocaleString([], {weekday:'short', hour:'2-digit', minute:'2-digit'})}</strong> or you drift past budget.`
+      : 'Set an entry and stop to price the holding cost.';
+
+    const grossRR = stopDist>0 && tgt>0 ? Math.abs(tgt-entry)/stopDist : 0;
+    const exitFeeTgt = units*tgt*COMMISSION;
+    const netWin = tgt>0 ? units*Math.abs(tgt-entry) - entryFee - exitFeeTgt - finFee : 0;
+    const netR = risk>0 && tgt>0 ? netWin/risk : 0;
+
+    $('cSize').textContent = units>0 ? units.toLocaleString(undefined,{maximumFractionDigits:6}) : '—';
+    $('cSize').className='ev';
+    $('cSizeSub').textContent = units>0
+      ? `units of ${sym} — type this into Breakout · stop ${fmt$2(stopDist)} away · a stop at your price costs exactly ${fmt$2(risk)}`
+      : 'set entry, stop and a risk figure';
+    const beR = p.winRate>0 ? (1-p.winRate)/p.winRate : Infinity;
+    // Where the chart ratio goes. 1R is the whole budgeted risk, but only part of that budget is
+    // the stop itself — the rest is the slippage buffer and the costs. Splitting the drop that
+    // way shows fees for what they are instead of letting the buffer be blamed on them.
+    const gapFee  = lossPerUnit>0 ? grossRR*(costPerUnit/lossPerUnit) : 0;
+    const gapFeeWin = risk>0 ? (entryFee+exitFeeTgt+finFee)/risk : 0;
+    const feeR = gapFee + gapFeeWin;
+
+    $('cRiskOut').textContent = fmt$2(risk);
+    $('cRiskSub').textContent = `= 1R at your stop · +${fmt$2(slipCost)} if it slips ${bps} bps`;
+    $('cNetR').textContent = tgt>0 ? grossRR.toFixed(2)+'R' : '—';
+    $('cNetR').className = 'v ' + (!(tgt>0) ? '' : netR>=beR*1.25 ? 'pos' : netR>=beR ? 'warn' : 'neg');
+    $('cNetRSub').textContent = tgt>0 ? `${netR.toFixed(2)}R net · ${fmt$2(netWin)}` : 'set a target';
+
+    $('cGap').hidden = !(tgt>0 && grossRR>0);
+    if(tgt>0 && grossRR>0){
+      $('cGap').innerHTML =
+        `<b>${grossRR.toFixed(2)}R</b> on the chart → <b>${netR.toFixed(2)}R</b> in the account. `+
+        `The whole <span class="g-fee">−${feeR.toFixed(2)}R</span> is commissions and financing (${fmt$2(totalCostStop)}), `+
+        `which bite because a ${(stopPct*100).toFixed(2)}% stop means ${fmt$(notional)} of notional per ${fmt$2(risk)} of risk. `+
+        `Slippage is not in here — the buffer carries it.`;
+    }
+    $('cNotional').textContent = fmt$(notional);
+
+    $('cDailyLeft').textContent = fmt$(st.dailyRoom);
+    $('cDailyLeft').className = 'v ' + (st.dailyRoom<=0?'neg':(risk+st.openRisk>st.dailyRoom?'warn':'pos'));
+    $('cDailyLeftSub').textContent = `limit ${fmt$(st.dailyLimit)} · equity ${fmt$(st.equity)}`;
+    $('cDDLeft').textContent = fmt$(st.ddRoom);
+    $('cDDLeft').className = 'v ' + (st.ddRoom<=0?'neg':(st.ddRoom<risk?'warn':'pos'));
+    $('cDDLeftSub').textContent = `static floor ${fmt$(st.ddFloor)}`;
+    // shown gross first, but the breakeven test runs on the net figure — testing the raw price
+    // ratio would pass trades that lose money once costs and slippage land
+    $('cRR').textContent = tgt>0 ? grossRR.toFixed(2)+'R' : '—';
+    $('cRRSub').textContent = !(tgt>0) ? 'set a target'
+      : `${netR.toFixed(2)}R net · `+(isFinite(beR) ? `breakeven needs ${beR.toFixed(2)}R` : 'set a win rate');
+    $('cRR').className = 'v ' + (netR>=beR?'pos':'neg');
+    $('cFees').textContent = fmt$2(totalCostStop);
+    $('cFeesSub').textContent = risk>0
+      ? `commissions + financing · ${feeR.toFixed(2)}R of your reward · ${(totalCostStop/risk*100).toFixed(1)}% of the ${fmt$2(risk)} max loss`
+      : '—';
+
+    const holdH=Math.max(0,+$('cHold').value||0);
+    const blocks = $('cPlat').value==='bo' ? Math.ceil(holdH/4) : Math.ceil(holdH/24);
+    const finLabel = $('cPlat').value==='bo'
+      ? `${(FIN_BLOCK*100).toFixed(4)}% × ${blocks} × 4h block${blocks===1?'':'s'}`
+      : `${(FIN_DAILY*100).toFixed(3)}% × ${blocks} day${blocks===1?'':'s'}`;
+    $('cCosts').querySelector('tbody').innerHTML = [
+      ['Commission in','0.040% of notional',entryFee],
+      ['Commission out (at stop)','0.040% of notional',exitFeeStop],
+      ['Financing',finLabel,finFee],
+      ['Total if stopped out','',totalCostStop],
+      ['Commission out (at target)','0.040% of notional',exitFeeTgt]
+    ].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${fmt$2(r[2])}</td></tr>`).join('');
+    $('cCostSub').textContent = `0.04% commission per side plus ${(FIN_DAILY*100).toFixed(3)}%/day financing on notional`+
+      ($('cPlat').value==='bo' ? ', deducted every 4 hours on the Breakout Terminal.' : ', deducted once daily at 00:25 UTC on DXtrade.');
+
+    const bcard=$('cBufferCard');
+    if(sr.mode==='budget'){
+      const b=budgetPlan(st);
+      bcard.hidden=false;
+      $('cBufferSub').textContent =
+        `${(b.usePct*100).toFixed(0)}% of the ${fmt$(b.allowance)} allowance is yours to spend: ${fmt$2(b.perTrade)} per trade across ${b.n}. `+
+        `Each of those already includes both commissions and the financing, so a stop at your price costs exactly ${fmt$2(cleanLoss)} — `+
+        `${(b.perTrade/st.dayStart*100).toFixed(2)}% of balance. The ${fmt$2(b.allowance-b.usable)} you held back is what absorbs a bad fill.`;
+      // every row starts from what the day has actually cost so far, not a clean slate
+      let rows=[];
+      if(b.spent>0) rows.push(`<tr><td>Already lost today</td><td>${fmt$2(b.spent)}</td>`+
+        `<td>${fmt$(st.dayStart-b.spent)}</td><td class="pos">${fmt$2(b.allowance-b.spent)}</td></tr>`);
+      for(let i=1;i<=b.left;i++){
+        const lost=b.spent+cleanLoss*i;
+        rows.push(`<tr><td>Trade ${i} loses cleanly</td><td>${fmt$2(cleanLoss)}</td><td>${fmt$(st.dayStart-lost)}</td>`+
+                  `<td class="${b.allowance-lost>0?'pos':'neg'}">${fmt$2(b.allowance-lost)}</td></tr>`);
+      }
+      rows.push(`<tr><td><strong>All ${b.left} lose at their stops</strong></td><td>${fmt$2(b.worstCase-b.spent)}</td>`+
+                `<td>${fmt$(st.dayStart-b.worstCase)}</td>`+
+                `<td class="${b.allowance-b.worstCase>0?'pos':'neg'}">${fmt$2(b.allowance-b.worstCase)}</td></tr>`);
+      const slipAll = b.worstCase + slipCost*b.left;
+      rows.push(`<tr><td><strong>…and every one slips ${bps} bps</strong></td><td>${fmt$2(slipAll-b.spent)}</td>`+
+                `<td>${fmt$(st.dayStart-slipAll)}</td>`+
+                `<td class="${b.allowance-slipAll>0?'pos':'neg'}">${fmt$2(b.allowance-slipAll)}</td></tr>`);
+      // How far every stop could fill past its price before the DAY breaches, expressed in the
+      // same bps the estimate uses. Positions are sized to the stop, so this is purely what the
+      // buffer buys: room = allowance - what the day has cost - the stops themselves.
+      const roomForSlip = b.allowance - Math.max(0, -st.todayPL) - (b.worstCase-b.spent);
+      const breakBps = (units>0 && b.left>0 && entry>0)
+        ? (roomForSlip/(b.left*units))/entry*10000 : 0;
+      rows.push(`<tr><td><strong>Breaks if every stop slips</strong></td><td colspan="3">`+
+                `${breakBps>bps ? breakBps.toFixed(0)+' bps — '+(breakBps/Math.max(bps,1)).toFixed(1)+'× the '+bps+' bps expected'
+                                : breakBps.toFixed(0)+' bps — less than the '+bps+' bps expected, hold back more of the limit'}</td></tr>`);
+      $('cBuffer').querySelector('tbody').innerHTML=rows.join('');
+      const spare=b.allowance-b.worstCase;
+      $('cBufferNote').textContent = spare>0
+        ? `Every remaining trade losing at its stop costs ${fmt$2(b.worstCase)} of the ${fmt$(b.allowance)} limit, leaving ${fmt$2(spare)} (${((spare/b.allowance)*100).toFixed(0)}%) as the slippage buffer. That buffer absorbs fills up to ${breakBps.toFixed(0)} bps past your stops — ${(breakBps/Math.max(bps,1)).toFixed(1)}× the ${bps} bps expected in these conditions. Stick to ${b.n} trades and never widen a stop.`
+        : `Warning: the remaining trades would breach at their stops alone. Lower the percentage of the limit you use or cut the trades per day.`;
+    } else { bcard.hidden=true; }
+
+    // day budget slots
+    if(sr.mode==='budget'){
+      const b=budgetPlan(st);
+      let slots='';
+      for(let i=0;i<b.n;i++){
+        const cls = i<b.taken ? 'used' : (i===b.taken ? 'next' : '');
+        slots += `<div class="slot ${cls}">${i<b.taken?'taken':(i===b.taken?'this one':fmt$(b.perTrade))}</div>`;
+      }
+      $('cBudgetBar').innerHTML=slots;
+    } else $('cBudgetBar').innerHTML='';
+
+    const checks=[];
+    const totalIfLost = risk + st.openRisk;
+    if(st.dailyRoom<=0) checks.push({s:'fail',t:'Already at or below the daily limit',d:`Equity ${fmt$(st.equity)} vs limit ${fmt$(st.dailyLimit)}.`});
+    else if(totalIfLost >= st.dailyRoom) checks.push({s:'fail',t:'This trade can breach the daily limit',d:`${fmt$(totalIfLost)} at risk vs ${fmt$(st.dailyRoom)} of room.`});
+    else if(sr.mode==='budget'){
+      const b=budgetPlan(st);
+      const spare=b.allowance-b.worstCase;
+      const acctNow = activeAccount();
+      const onWho = acctNow ? ' on '+acctNow.label : ' with no account selected';
+      const counted = tradesTodayList().map(describeTrade).join(', ');
+      if(b.taken>=b.n) checks.push({s:'fail',t:`Daily trade limit reached (${b.taken} of ${b.n})`,
+        d:`Counted${onWho} today: ${counted}. That is the limit you set — stop here, or delete a trade on the Journal tab if this is wrong.`});
+      else if(spare>0) checks.push({s:'ok',t:'Daily breach impossible today',d:`${b.spent>0? fmt$2(b.spent)+' already lost plus ':''}${b.left} × ${fmt$2(b.perTrade)} = ${fmt$2(b.worstCase)}, still ${fmt$2(spare)} short of the ${fmt$(b.allowance)} limit.`});
+      else checks.push({s:'fail',t:'Your daily budget can breach',d:`Worst case ${fmt$2(b.worstCase)} against a ${fmt$(b.allowance)} allowance.`});
+      if(b.taken<b.n && b.taken>0) checks.push({s:'ok',t:`Trade ${b.taken+1} of ${b.n} today`,
+        d:`${Math.max(0,b.left-1)} left after this one. Counted${onWho} today: ${counted}.`});
+      // sizing follows your rule; this only reports where that rule lands against the static floor
+      if(b.streakBreaches) checks.push({s:'warn', t:'A normal losing run would clear the static floor',
+        d:`${b.lossesToBreach} straight losses at ${fmt$2(b.perTrade)} spends the ${(st.p.maxDD*100).toFixed(1)}% max drawdown, and a ${b.streak}-loss run is normal at ${fmtPct(st.p.winRate)} wins. Your call — widen the buffer or take fewer trades a day if you want more room.`});
+      else checks.push({s:'ok', t:'Survives a normal losing run',
+        d:`A ${b.streak}-loss run at ${fmt$2(b.perTrade)} costs ${fmt$2(b.perTrade*b.streak)}, inside the ${fmt$(st.p.acct*st.p.maxDD)} static drawdown.`});
+    }
+    else if(totalIfLost > st.dailyRoom*0.6) checks.push({s:'warn',t:'Uses most of your daily room',d:`${fmt$(totalIfLost)} of ${fmt$(st.dailyRoom)} left.`});
+    else checks.push({s:'ok',t:'Daily limit safe',d:`${fmt$(totalIfLost)} at risk, ${fmt$(st.dailyRoom)} of room.`});
+
+    if(st.ddRoom<=0) checks.push({s:'fail',t:'At the max drawdown floor',d:`Equity ${fmt$(st.equity)} vs floor ${fmt$(st.ddFloor)}.`});
+    else if(totalIfLost >= st.ddRoom) checks.push({s:'fail',t:'This trade can blow the account',d:`${fmt$(totalIfLost)} at risk vs ${fmt$(st.ddRoom)} above the static floor.`});
+    else if(totalIfLost > st.ddRoom*0.5) checks.push({s:'warn',t:'Over half your total drawdown room',d:`${fmt$(totalIfLost)} of ${fmt$(st.ddRoom)} to the floor.`});
+    else checks.push({s:'ok',t:'Max drawdown safe',d:`${fmt$(st.ddRoom)} of room above ${fmt$(st.ddFloor)}.`});
+
+    if(!(stopDist>0)) checks.push({s:'fail',t:'Invalid stop',d:'Entry and stop are the same price.'});
+    else if(tgt>0){
+      const wantLong = tgt>entry;
+      if(wantLong ? stop>=entry : stop<=entry) checks.push({s:'fail',t:'Stop is on the wrong side of entry',d:'Check your entry, stop and target prices.'});
+    }
+
+    if(!(grossRR>0)) checks.push({s:'warn',t:'No target set',d:'Add a target to check the trade pays enough for your win rate.'});
+    else if(netR < beR) checks.push({s:'fail',t:'Reward too small once fees land',d:`${netR.toFixed(2)}R net vs the ${beR.toFixed(2)}R you need at ${fmtPct(p.winRate)} wins.`});
+    else if(netR < beR*1.25) checks.push({s:'warn',t:'Only just above breakeven',d:`${netR.toFixed(2)}R net vs ${beR.toFixed(2)}R needed — thin once slippage lands.`});
+    else checks.push({s:'ok',t:'Reward clears your breakeven after fees',d:`${netR.toFixed(2)}R net vs ${beR.toFixed(2)}R needed.`});
+
+    const maxSize=symInfo[0], lev=symInfo[1], marginMax=st.equity*lev;
+    const overCap = notional>maxSize, overLev = notional>marginMax;
+    if(overCap) checks.push({s:'fail',t:`Over the ${sym} position cap`,d:`${fmt$(notional)} notional vs the ${fmt$(maxSize)} maximum.`});
+    if(overLev) checks.push({s:'fail',t:'Exceeds available leverage',d:`${fmt$(notional)} notional is above the ${lev}× cap on ${sym} (${fmt$(marginMax)} max).`});
+    if(!overCap && !overLev){
+      if(notional>maxSize*0.8) checks.push({s:'warn',t:'Near the symbol position cap',d:`${fmt$(notional)} of ${fmt$(maxSize)} allowed.`});
+      else checks.push({s:'ok',t:'Within size and leverage limits',d:`${fmt$(notional)} notional · ${(notional/Math.max(st.equity,1)).toFixed(2)}× of equity · ${lev}× allowed on ${sym}.`});
+    }
+
+    if(sr.capped) checks.push({s:'warn',t:'Risk trimmed to fit your remaining room',d:`Cut to ${fmt$2(risk)} so the trade stays inside the limits.`});
+
+    if(finShare>0.25) checks.push({s:'fail',t:'Holding cost eats the trade',d:`${fmt$2(finFee)} financing is ${(finShare*100).toFixed(0)}% of your risk over ${holdH2}h. Widen the stop, shorten the hold, or skip it.`});
+    else if(finShare>0.12) checks.push({s:'warn',t:'Financing is a real drag here',d:`${fmt$2(finFee)} over ${holdH2}h = ${(finShare*100).toFixed(0)}% of risk, bleeding ${(bleedPerDay*100).toFixed(1)}%/day.`});
+    else checks.push({s:'ok',t:'Holding cost budgeted',d:`${fmt$2(finFee)} for up to ${holdH2}h (${(bleedPerDay*100).toFixed(1)}% of risk per day). Close by then to stay inside it.`});
+
+    const stt = journalStats();
+    if(stt && stt.streak<=-3) checks.push({s:'warn',t:`${Math.abs(stt.streak)} losses in a row`,d:'Your journal shows a losing streak. Halve the size or stand down for the day.'});
+
+    const fails=checks.filter(c=>c.s==='fail').length, warns=checks.filter(c=>c.s==='warn').length;
+    const box=$('cVerdict');
+    if(fails){ box.className='verdictBox block'; $('cVerdictTitle').textContent='Do not take this trade';
+      $('cVerdictSub').textContent=`${fails} rule ${fails===1?'breach':'breaches'} below.`; }
+    else if(warns){ box.className='verdictBox caution'; $('cVerdictTitle').textContent='Take it carefully';
+      $('cVerdictSub').textContent=`${warns} warning${warns===1?'':'s'} — legal, but tighter than ideal. ${sr.why}`; }
+    else { box.className='verdictBox clear'; $('cVerdictTitle').textContent='Clear to trade';
+      $('cVerdictSub').textContent=`Inside every Breakout limit and your own plan. ${sr.why}`; }
+
+    const mark = s => s==='ok'?'✓':(s==='warn'?'!':'✕');
+    $('cChecks').innerHTML = checks.map(c=>
+      `<li class="${c.s}"><span class="mark">${mark(c.s)}</span><span class="body"><b>${esc(c.t)}</b><span>${esc(c.d)}</span></span></li>`).join('');
+
+    // `float` carries the open positions' unrealised P/L: it still counts toward equity in the
+    // first two rows because those positions stay open, but is replaced by their realised loss
+    // in the third, where they are stopped out.
+    const rows=[
+      {n:'Target hit', pl: st.todayPL + netWin, float: st.floatPL},
+      {n:'Stopped out', pl: st.todayPL - risk, float: st.floatPL},
+      {n:'This plus every open position stops', pl: st.todayPL - totalIfLost, float: 0}
+    ];
+    $('cScenario').querySelector('tbody').innerHTML = rows.map(r=>{
+      const eq = st.dayStart + r.pl + r.float;
+      const dailyOk = eq > st.dailyLimit, ddOk = eq > st.ddFloor;
+      return `<tr><td>${r.n}</td><td class="${r.pl>=0?'pos':'neg'}">${fmt$2(r.pl)}</td><td>${fmt$(eq)}</td>`+
+             `<td class="${dailyOk?'pos':'neg'}">${dailyOk?'OK':'BREACH'}</td>`+
+             `<td class="${ddOk?'pos':'neg'}">${ddOk?'OK':'BREACH'}</td></tr>`;
+    }).join('');
+
+    lastPlanned = {sym, entry, stop, tgt, units, risk, cleanLoss, notional, netR, grossRR, plannedGrossR:grossRR,
+                   dir: tgt>0 ? (tgt>entry?'long':'short') : (stop<entry?'long':'short'),
+                   fees: totalCostStop};
+    $('cLog').disabled = !(units>0 && risk>0);
+  }
+
+  function syncCheckerToday(){
+    // These mirror the journal for THIS account only. Another account's losses sit against its
+    // own daily limit, so folding them in here would shrink a limit that has not moved.
+    // They must also reset to zero when the journal empties, otherwise a deleted or closed
+    // trade leaves a stale figure skewing every later calculation.
+    const today = tradingDay();
+    const mine  = journal.filter(t=>jAcct(t)===activeAcctId);
+    const a = activeAccount();
+    const who = a ? 'on '+a.label : 'with no account selected';
+    // realised P/L lands on the day the trade was closed, which is the day the limit sees it
+    const todays = mine.filter(t=>t.status!=='open' && (t.dateClosed||t.date)===today);
+    $('cToday').value = todays.length ? Math.round(todays.reduce((x,t)=>x+(+t.pl||0),0)) : 0;
+    $('cTodayHint').textContent = todays.length
+      ? 'From '+todays.length+' trade'+(todays.length===1?'':'s')+' closed today '+who+'. Edit if you traded outside the journal.'
+      : 'No trades closed today '+who+'. Negative if you are down.';
+
+    const open = mine.filter(t=>t.status==='open');
+    $('cOpen').value = open.length ? Math.round(open.reduce((x,t)=>x+(+t.risk||0),0)) : 0;
+    $('cOpenHint').textContent = open.length
+      ? 'From '+open.length+' open position'+(open.length===1?'':'s')+' '+who+'.'
+      : 'No open positions '+who+'. Enter manually if you have any.';
+  }
+
+  // ================= orchestration =================
+  let runToken=0;
+  function recalc(){
+    const token=++runToken;
+    const p=readParams();
+    $('busy').textContent='simulating…';
+    setTimeout(()=>{
+      if(token!==runToken) return;
+      const main=fullSim(p,4000,12345,true);
+      renderMain(main,p);
+      $('busy').textContent='sweeping win rates…';
+      const w0=+$('winRate').value;
+      const lo=Math.max(5,w0-10), hi=Math.min(95,w0+10);
+      const pts=[]; const steps=20; let i=0;
+      (function step(){
+        if(token!==runToken) return;
+        const t0=performance.now();
+        while(i<=steps && performance.now()-t0<40){
+          const w=lo+(hi-lo)*i/steps;
+          pts.push({w, ev: fullSim(Object.assign({},p,{winRate:w/100}),700,999,false).ev});
+          i++;
+        }
+        if(i<=steps){ setTimeout(step,0); return; }
+        // Mark your position using the curve's own sampling. Using the main 4,000-run figure
+        // here would park the dot visibly off the line it is supposed to sit on.
+        pts.sort((a,b)=>a.w-b.w);
+        let here=pts[0];
+        for(const d of pts) if(Math.abs(d.w-w0)<Math.abs(here.w-w0)) here=d;
+        renderChart(pts,{w:here.w,ev:here.ev});
+        $('busy').textContent='comparing plans…';
+        const cmp={}; let j=0;
+        (function cstep(){
+          if(token!==runToken) return;
+          const t1=performance.now();
+          while(j<PLAN_KEYS.length && performance.now()-t1<40){
+            const k=PLAN_KEYS[j];
+            const rk = planRisk(k);   // each plan sized on its own drawdown, not a shared figure
+            cmp[k]=fullSim(Object.assign({},p,{risk:rk, target:PLANS[k].target/100, maxDD:PLANS[k].maxdd/100,
+              dailyDD:PLANS[k].dailydd/100, split:1, acct:1, cost:0}),4000,12345,true);
+            cmp[k].risk = rk;
+            j++;
+          }
+          if(j<PLAN_KEYS.length){ setTimeout(cstep,0); return; }
+          renderRecommendation(cmp,p);
+          buildPlan(p,main,cmp);
+          renderLadder(cmp,p);
+          $('busy').textContent='';
+        })();
+      })();
+    },0);
+  }
+
+  // ================= wiring =================
+  function pair(rangeId,numId){
+    const r=$(rangeId), n=$(numId);
+    r.addEventListener('input',()=>{
+      n.value=r.value; showPair(rangeId);
+      if(rangeId==='winRate') debouncedWithRisk(); else debounced();
+    });
+    // While typing, only steer the slider — never rewrite what's in the box. Rewriting mid-entry
+    // makes low numbers impossible to type: "25" clamps to the minimum on the first keystroke,
+    // so the second digit lands on the clamped value instead.
+    n.addEventListener('input',()=>{
+      if(n.value==='' || isNaN(+n.value)) return;
+      r.value = Math.min(+r.max, Math.max(+r.min, +n.value));
+      showPair(rangeId);
+      if(rangeId==='winRate') debouncedWithRisk(); else debounced();
+    });
+    // Snap the box to the valid range once you're done with it, so the number you see
+    // is the number the simulation actually ran on.
+    n.addEventListener('change',()=>{
+      if(n.value==='' || isNaN(+n.value)){ n.value=r.value; showPair(rangeId); return; }
+      const v=Math.min(+r.max, Math.max(+r.min, +n.value));
+      if(+n.value!==v) n.value=v;
+      r.value=v; showPair(rangeId); debounced();
+    });
+    showPair(rangeId);
+  }
+  let timer=null;
+  function debounced(){ clearTimeout(timer); timer=setTimeout(()=>{ saveState(); recalc(); renderChecker(); },250); }
+  // risk is derived from the win rate and the plan's limits, so it must be recomputed
+  // before the simulation runs — not after it
+  function debouncedWithRisk(){ applyAutoRisk(); debounced(); }
+
+  pair('winRate','winRateN'); pair('rr','rrN'); pair('risk','riskN');
+  ['tpw','target','cost','maxdd','dailydd','payoutTrig','horizon','bankroll']
+    .forEach(id=>{ $(id).addEventListener('input',debounced); $(id).addEventListener('change',debounced); });
+  ['cDayStart','cToday','cFloat','cOpen','cEntry','cStop','cTarget','cRisk','cHold','cFlatPct']
+    .forEach(id=>$(id).addEventListener('input',renderChecker));
+  ['cSym','cPlat'].forEach(id=>$(id).addEventListener('change',renderChecker));
+  // timeframe sets a default max hold — how long you'd let a trade run before closing it
+  const TF_HOLD = {15:6, 60:24, 240:96, 1440:336};
+  $('cTF').addEventListener('change',()=>{ $('cHold').value = TF_HOLD[$('cTF').value]||24; renderChecker(); });
+
+  $('cSym').innerHTML = Object.keys(SYMBOLS)
+    .map(s=>`<option value="${s}">${s} · ${SYMBOLS[s][1]}× · max ${fmt$(SYMBOLS[s][0])}</option>`).join('');
+  $('cSym').value='BTCUSD';
+
+  function updateStrat(){
+    const m=$('cStrat').value;
+    $('cBudgetFields').hidden = m!=='budget';
+    $('cFlatField').hidden = m!=='flat';
+    $('cManualField').hidden = m!=='manual';
+    $('cStratHint').textContent =
+      m==='budget' ? 'Takes the day’s loss allowance, holds back a safety margin, and splits the rest into equal same-sized trades. Every trade risks the same amount with fees included, so losing all of them still leaves you short of the limit — a daily breach is impossible while you stick to the trade count.'
+    : m==='flat' ? 'Classic fixed percentage of balance. Simple, but says nothing about how close you already are to a limit.'
+    : 'You set the dollar risk; everything else is still checked against the rules.';
+    renderChecker();
+  }
+  $('cStrat').addEventListener('change',updateStrat);
+  ['cMaxTrades','cUsePct'].forEach(id=>$(id).addEventListener('input',renderChecker));
+  $('cCond').addEventListener('change',renderChecker);
+
+  $('cAcctSel').addEventListener('change',()=>{
+    const v=$('cAcctSel').value;
+    activeAcctId = v===''? null : +v;
+    saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
+    renderJournal(); renderJournalStats(); renderLive();
+  });
+  // remember the day-start balance against the selected account
+  $('cDayStart').addEventListener('change',()=>{
+    const a=activeAccount();
+    if(a){ a.bal=+$('cDayStart').value||a.size; saveAccounts(); renderAccounts(); }
+  });
+
+  // log the checked trade straight into the journal as an open position
+  $('cLog').addEventListener('click',()=>{
+    if(!lastPlanned || !(lastPlanned.units>0)) return;
+    const a=activeAccount();
+    journal.push({id:Date.now(), date:tradingDay(),
+      opened:new Date().toISOString(),          // financing is charged on real elapsed time
+      acctId:(a?a.id:null),                     // the account this trade's limits belong to
+      sym:lastPlanned.sym, dir:lastPlanned.dir, risk:Math.round(lastPlanned.risk*100)/100,
+      pl:0, acct:(a?a.size:+$('acct').value), acctLabel:(a?a.label:null), status:'open',
+      paper: isPaper(a ? a.plan : $('plan').value), plat:$('cPlat').value,
+      entry:lastPlanned.entry, stop:lastPlanned.stop, target:lastPlanned.tgt,
+      units:lastPlanned.units, plannedR:lastPlanned.netR, plannedGrossR:lastPlanned.grossRR, plannedFees:lastPlanned.fees,
+      mark:null, cleanLoss:lastPlanned.cleanLoss, note:''});
+    saveJournal(); renderJournal(); renderJournalStats(); syncCheckerToday(); renderLive();
+    renderChecker();   // the logged trade consumes a slot and changes open risk — re-check now
+    $('cLogMsg').textContent='Logged. Track it on the Dashboard and settle it with the real fill when it closes.';
+    setTimeout(()=>$('cLogMsg').textContent='',4000);
+  });
+
+  function updateRuleLock(){
+    // paper accounts keep their rules editable so they can mirror whichever plan you're rehearsing
+    const locked = !isPaper($('plan').value);
+    ['target','maxdd','dailydd'].forEach(id=>$(id).disabled=locked);
+  }
+  function updateFee(){
+    if(isPaper($('plan').value)){ $('cost').value=0; $('cost').disabled=true; return; }
+    $('cost').disabled=false;
+    const t=FEES[$('plan').value];
+    const f=t && t[$('acct').value];
+    if(f) $('cost').value = f[+$('split').value===90?1:0];
+  }
+  function guardClassic200k(){
+    const classic = $('plan').value==='classic';
+    $('acct').querySelector('option[value="200000"]').disabled = classic;
+    if(classic && $('acct').value==='200000') $('acct').value='100000';
+  }
+  function updatePayoutMode(){ $('trigField').style.display = $('payoutMode').value==='win' ? 'none' : ''; }
+
+  $('plan').addEventListener('change',()=>{
+    const v=$('plan').value;
+    if(PLANS[v]){ $('target').value=PLANS[v].target; $('maxdd').value=PLANS[v].maxdd; $('dailydd').value=PLANS[v].dailydd; }
+    updateRuleLock(); guardClassic200k(); updateFee(); debouncedWithRisk();
+  });
+  ['maxdd','dailydd'].forEach(id=>$(id).addEventListener('input',()=>applyAutoRisk()));
+  $('autoRisk').addEventListener('change',()=>{
+    const on=$('autoRisk').checked;
+    ['risk','riskN'].forEach(id=>$(id).disabled=on);
+    debouncedWithRisk();
+  });
+  // Never clobber the checker's balance while a real account is selected — the Dashboard's
+  // account dropdown is a what-if for the simulator, not a change to what you're trading.
+  $('acct').addEventListener('change',()=>{
+    updateFee();
+    $('jAcct').placeholder = $('acct').value;
+    if(!activeAccount()) $('cDayStart').value = $('acct').value;
+    debounced(); renderChecker();
+  });
+  $('split').addEventListener('change',()=>{ updateFee(); debounced(); });
+  $('payoutMode').addEventListener('change',()=>{ updatePayoutMode(); debounced(); });
+  $('useTracked').addEventListener('change',()=>{
+    let on=$('useTracked').checked;
+    // don't lock the manual inputs when the journal has too little data to drive them —
+    // that would grey out the controls while the old values silently ran the simulation
+    if(on && !applyTracked()){ on=false; $('useTracked').checked=false; }
+    lockTracked(on);
+    if(!on) $('trackedHint').textContent='Spread across 7 days — crypto trades all week.';
+    debounced();
+  });
+
+  // tabs
+  const VIEWS=[['tab-dash','view-dash'],['tab-check','view-check'],['tab-jrn','view-jrn']];
+  function showView(vid){
+    VIEWS.forEach(([t,v])=>{ $(t).setAttribute('aria-selected', v===vid); $(v).hidden = v!==vid; });
+    if(vid==='view-check'){ syncCheckerToday(); renderChecker(); startFeed(); }
+    if(vid==='view-jrn'){ renderJournal(); renderJournalStats(); }
+    if(vid==='view-dash'){ renderLive(); startFeed(); }
+  }
+  VIEWS.forEach(([tid,vid])=>$(tid).addEventListener('click',()=>showView(vid)));
+
+  // journal actions
+  $('jAdd').addEventListener('click',()=>{
+    const risk=+$('jRisk').value, pl=+$('jPL').value, acct=+$('jAcct').value||+$('acct').value;
+    if(!(risk>0)){ $('jAddMsg').textContent='Enter what you risked.'; return; }
+    if($('jPL').value===''){ $('jAddMsg').textContent='Enter the P/L (0 for breakeven).'; return; }
+    const av=$('jAcctSel').value;
+    const aid = av==='none' ? null : +av;
+    const aRec = acctById(aid);
+    const d = $('jDate').value||tradingDay();
+    journal.push({id:Date.now(), date:d, dateClosed:d, acctId:aid, acctLabel:aRec?aRec.label:null,
+      paper: aRec ? isPaper(aRec.plan) : false,
+      sym:$('jSym').value.trim().toUpperCase(), dir:$('jDir').value, risk, pl, acct,
+      status:'closed', note:$('jNote').value.trim()});
+    saveJournal();
+    $('jRisk').value=''; $('jPL').value=''; $('jNote').value='';
+    $('jAddMsg').textContent='Added.';
+    setTimeout(()=>$('jAddMsg').textContent='',1800);
+    renderJournal(); renderJournalStats(); syncCheckerToday(); renderLive();
+    if($('useTracked').checked){ applyTracked(); debounced(); }
+  });
+  $('jFilter').addEventListener('change',()=>{ renderJournal(); renderJournalStats(); });
+  $('jManualToggle').addEventListener('click',()=>{
+    const f=$('jManualForm');
+    f.hidden=!f.hidden;
+    $('jManualToggle').textContent = f.hidden? 'Enter one manually' : 'Hide manual entry';
+  });
+  $('jExport').addEventListener('click',()=>{
+    $('jIoBox').hidden=false; $('jIo').value=JSON.stringify(journal,null,2);
+    $('jIoMsg').textContent='Copy this and keep it somewhere safe.'; $('jIo').select();
+  });
+  $('jImport').addEventListener('click',()=>{
+    $('jIoBox').hidden=false; $('jIo').value=''; $('jIoMsg').textContent='Paste exported JSON, then Load.'; $('jIo').focus();
+  });
+  $('jIoClose').addEventListener('click',()=>{ $('jIoBox').hidden=true; });
+  $('jIoLoad').addEventListener('click',()=>{
+    try{
+      const d=JSON.parse($('jIo').value);
+      if(!Array.isArray(d)) throw 0;
+      journal=d.filter(t=>t&&typeof t.risk==='number');
+      migrateJournal();
+      saveJournal(); renderJournal(); renderJournalStats(); syncCheckerToday(); renderLive();
+      $('jIoMsg').textContent=`Loaded ${journal.length} trades.`;
+      if($('useTracked').checked){ applyTracked(); debounced(); }
+    }catch(e){ $('jIoMsg').textContent='That isn’t valid exported JSON.'; }
+  });
+  $('jClear').addEventListener('click',()=>{
+    if(!journal.length) return;
+    if($('jClear').dataset.armed){
+      journal=[]; settling=null;
+      saveJournal(); renderJournal(); renderJournalStats(); syncCheckerToday(); renderLive();
+      $('jClear').textContent='Clear all'; delete $('jClear').dataset.armed;
+    } else {
+      $('jClear').textContent='Click again to confirm'; $('jClear').dataset.armed='1';
+      setTimeout(()=>{ $('jClear').textContent='Clear all'; delete $('jClear').dataset.armed; },4000);
+    }
+  });
+
+  // ================= persistence =================
+  const FIELD_IDS = Object.keys(DEFAULTS);
+  function saveState(){
+    try{
+      const s={}; FIELD_IDS.forEach(id=>s[id]=$(id).value);
+      s.useTracked = $('useTracked').checked;
+      s.autoRisk = $('autoRisk').checked;
+      localStorage.setItem(STORE_KEY, JSON.stringify(s));
+    }catch(e){}
+  }
+  function applyState(s){
+    FIELD_IDS.forEach(id=>{ if(s[id]!=null) $(id).value=s[id]; });
+    ['winRate','rr','risk'].forEach(id=>{ $(id+'N').value=$(id).value; showPair(id); });
+    $('useTracked').checked = !!s.useTracked;
+    $('autoRisk').checked = s.autoRisk!==false;      // derived risk is the default
+    updateRuleLock(); guardClassic200k(); updatePayoutMode();
+    applyAutoRisk();
+    lockTracked($('useTracked').checked);
+    if($('useTracked').checked) applyTracked();
+  }
+  function restoreState(){
+    let s=null;
+    try{ const raw=localStorage.getItem(STORE_KEY); if(raw) s=JSON.parse(raw); }catch(e){}
+    applyState(s||DEFAULTS);
+  }
+  $('resetBtn').addEventListener('click',()=>{
+    try{ localStorage.removeItem(STORE_KEY); }catch(e){}
+    applyState(DEFAULTS); saveState(); recalc(); renderChecker();
+  });
+
+  // ================= boot =================
+  loadAccounts();           // must precede loadJournal so old trades can be matched to accounts
+  loadJournal();
+  restoreState();
+  $('jDate').value = tradingDay();
+  $('jAcct').placeholder = $('acct').value;
+  $('cDayStart').value = $('acct').value;
+  renderAccounts(); syncAccountToChecker();
+  renderJournal(); renderJournalStats(); renderLive(); syncCheckerToday(); updateStrat();
+  startFeed();
+  recalc();
+})();
+</script>
+
+</body>
+</html>
