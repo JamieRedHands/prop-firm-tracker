@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="75c4bf3 · 1 Sept 2026, 16:23">
+<meta name="build" content="be2f4fc · 1 Sept 2026, 16:34">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -314,7 +314,11 @@
   .lfoot{font-size:11.5px; color:var(--muted); font-family:"IBM Plex Mono",monospace; margin:0 0 10px}
 
   /* OKX feed */
-  .feedbar{display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-family:"IBM Plex Mono",monospace;
+  .feedrow{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+  .feedrow + .feedrow{margin-top:6px}
+  .feedrow .fsrc{min-width:112px}
+  .ffund{color:var(--muted)}
+  .feedbar{display:flex; flex-direction:column; align-items:stretch; gap:0; font-family:"IBM Plex Mono",monospace;
            font-size:12px; color:var(--sub); background:var(--inset); border:1px solid var(--border);
            border-radius:8px; padding:8px 12px; margin-bottom:12px}
   .feedbar .fdot{width:8px; height:8px; border-radius:50%; background:var(--muted); flex:none}
@@ -322,7 +326,7 @@
   .feedbar.off .fdot{background:var(--warn)}
   .feedbar b{color:var(--ink); font-weight:600}
   .feedbar .fsrc{color:var(--muted)}
-  .feedbar .fage{margin-left:auto; color:var(--muted); font-size:11px}
+  .feedbar .fage{align-self:flex-end; color:var(--muted); font-size:11px; margin-top:4px}
   .feedbar button{background:none; border:1px solid var(--border); color:var(--sub); border-radius:6px;
                   font:inherit; font-size:11px; padding:3px 9px; cursor:pointer}
   .feedbar button:hover{color:var(--ink); border-color:var(--muted)}
@@ -1318,10 +1322,20 @@
   // Breakout bills its own financing in 4h blocks (or once a day on DXtrade) whichever way you
   // are positioned. Propr passes through Hyperliquid funding, which is hourly, peer-to-peer and
   // signed: while the rate is positive, longs pay shorts.
-  function finFor(hours, plat, dir){
+  // BTC and ETH fund at different rates, so a position is costed on its OWN symbol's rate.
+  // Collapsing them to one number priced an ETH position at BTC's funding whenever BTC happened
+  // to be the symbol selected in the checker.
+  function fundingDaily(sym){
+    const f=FIRM.financing;
+    if(f.kind!=='funding') return f.daily;
+    const book = feed.funding[feedOf(FIRM_KEY).src];
+    const hr = book && (book[sym]!=null ? book[sym] : book.BTCUSD);
+    return (hr!=null && isFinite(hr)) ? hr*24 : f.daily;
+  }
+  function finFor(hours, plat, dir, sym){
     const f=FIRM.financing;
     let rate;
-    if(f.kind==='funding') rate = f.daily*Math.ceil(Math.max(hours,0))/24;
+    if(f.kind==='funding') rate = fundingDaily(sym)*Math.ceil(Math.max(hours,0))/24;
     else rate = (plat==='dx') ? FIN_DAILY*Math.ceil(hours/24) : FIN_BLOCK*Math.ceil(hours/4);
     if(f.directional && dir==='short') rate = -rate;
     return rate;
@@ -1346,7 +1360,7 @@
     const gross  = units*(exitPx-entry)*dir;
     const feeIn  = units*entry*entryComm(t.fill);
     const feeOut = units*exitPx*(exitKind==='maker' ? targetComm(t.fill) : commRate('taker'));
-    const fin    = units*entry*finFor(hours, plat, t.dir);
+    const fin    = units*entry*finFor(hours, plat, t.dir, t.sym);
     const net    = gross - feeIn - feeOut - fin;
     // Slippage is measured against whichever level the fill landed nearest — that is the one
     // you were aiming at. Positive means it filled better than the level, negative means worse.
@@ -1495,7 +1509,7 @@
         const sy=$('cSym') ? $('cSym').value : 'BTCUSD';
         const hr=hf[sy]!=null ? hf[sy] : hf.BTCUSD;
         if(hr!=null && isFinite(hr)) FIRMS.propr.financing.daily = hr*24;
-        if(FIRM_KEY==='propr') FIN_DAILY = FIRMS.propr.financing.daily;
+        if(FIRM_KEY==='propr') FIN_DAILY = fundingDaily(sy);
       }
       feed.ok=true; feed.fails=0; feed.ts=Date.now();
       onFeed();
@@ -1562,20 +1576,20 @@
     }
     const age=Math.max(0,Math.round((Date.now()-feed.ts)/1000));
     const stale=feedStale();
-    const parts=[];
-    feedSources().forEach(f=>{
-      const book=feed.px[f.src]; if(!book) return;
-      parts.push('<span class="fsrc">'+esc(f.name)+'</span>');
-      Object.keys(book).forEach(sy=>parts.push('<span>'+sy.replace('USD','')+' <b>'+px6(book[sy].last)+'</b></span>'));
+    // one row per venue, with each asset's own funding rate — they are rarely the same
+    const rows=feedSources().map(f=>{
+      const book=feed.px[f.src]; if(!book) return '';
+      const px=Object.keys(book).map(sy=>
+        '<span>'+sy.replace('USD','')+' <b>'+px6(book[sy].last)+'</b></span>').join('');
       const hf=feed.funding[f.src];
-      if(hf){
-        const sy=$('cSym') ? $('cSym').value : 'BTCUSD';
-        const hr=hf[sy]!=null?hf[sy]:hf.BTCUSD;
-        if(hr!=null) parts.push('<span class="fsrc">funding '+(hr*24*100).toFixed(3)+'%/day</span>');
-      }
-    });
+      const fund = hf ? '<span class="ffund">funding '+Object.keys(book)
+        .filter(sy=>hf[sy]!=null)
+        .map(sy=>sy.replace('USD','')+' '+(hf[sy]*24*100).toFixed(3)+'%/day')
+        .join('  ')+'</span>' : '';
+      return '<div class="feedrow"><span class="fdot"></span><span class="fsrc">'+esc(f.name)+'</span>'+px+fund+'</div>';
+    }).join('');
     bar.className='feedbar '+(stale?'off':'on');
-    bar.innerHTML='<span class="fdot"></span>'+parts.join('')+
+    bar.innerHTML=rows+
       '<span class="fage">'+(stale ? 'stale · '+(age<90?age+'s':Math.round(age/60)+'m')+' old, tab was in the background'
                                    : (age<2?'just now':age+'s ago'))+'</span>';
   }
@@ -2192,7 +2206,7 @@
       // charges financing daily rather than per 4h block, which is a different number
       const has = FIRM.platforms.some(x=>x[0]===$('cPlat').value);
       const plat = has ? $('cPlat').value : (FIRM.platforms[0]||['bo'])[0];
-      const fin = finFor(hold, plat, dir);
+      const fin = finFor(hold, plat, dir, $('cSym').value);
       const costStop = entryComm()*entry + stopComm()*stop + fin*entry;
       const costTgt  = entryComm()*entry + targetComm()*tgt  + fin*entry;
       const lossPerUnit = stopDist + costStop;
@@ -2634,7 +2648,7 @@
 
   // ================= pre-trade checker =================
   function finRate(dir){
-    return finFor(Math.max(0, +$('cHold').value||0), $('cPlat').value, dir);
+    return finFor(Math.max(0, +$('cHold').value||0), $('cPlat').value, dir, $('cSym').value);
   }
 
   function checkerState(){
