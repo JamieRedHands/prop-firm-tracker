@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="52c6b03 · 1 Sept 2026, 20:52">
+<meta name="build" content="695a066 · 1 Sept 2026, 21:01">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -1705,6 +1705,7 @@
     const c = money ? settleCalc(t, px, x.ms, x.kind) : null;
     const L = money ? liveState(t, px) : null;
     const locked = !!(x && x.locked);
+    const sn = stopNow(t);
     const cls = L ? (L.hitStop?'hitStop':(L.hitTgt?'hitTgt':'')) : '';
     return '<div class="live '+cls+'" data-row="'+id+'" data-mode="'+liveMode(t)+'">'+
       '<div class="lhead"><b>'+esc(t.sym||'—')+' '+dirTag(t)+'</b>'+
@@ -1722,6 +1723,8 @@
         '<div><span class="lk" data-out="feelabel-'+id+'">'+(locked?'Costs':'Costs so far')+'</span><span class="lv" data-out="fees-'+id+'">'+(c?fmt$2(c.fees):'—')+'</span></div>'+
         '<div><span class="lk">Net after costs</span><span class="lv '+plCls(c)+'" data-out="pln-'+id+'">'+(c?fmt$2(c.net):'—')+'</span>'+
           '<span class="lsub" data-out="rn-'+id+'">'+(c?(c.R>=0?'+':'')+c.R.toFixed(2)+'R net':'')+'</span></div>'+
+        (sn ? '<div><span class="lk">If stopped now</span><span class="lv neg" data-out="stp-'+id+'">'+fmt$2(sn.net)+'</span>'+
+              '<span class="lsub" data-out="stpr-'+id+'">'+sn.R.toFixed(2)+'R all in</span></div>' : '')+
       '</div>'+
       track(t, L, id)+
       alertBanner(t)+
@@ -1732,6 +1735,8 @@
       '</div></div>';
   }
   const plCls = c => !c ? '' : (c.net>=0?'pos':'neg');
+  const stopNow = t => (priceable(t) && +t.stop>0 && !t.alerted)
+    ? settleCalc(t, +t.stop, Date.now(), 'taker') : null;
   // the part of 1R that is pure price move — the rest is what the round trip costs
   const priceRiskOf = t => (+t.units>0 && +t.entry>0 && +t.stop>0)
     ? +t.units*Math.abs(+t.stop-+t.entry) : null;
@@ -1853,6 +1858,8 @@
     set('rg',  c?(c.Rg>=0?'+':'')+c.Rg.toFixed(2)+'R':'—', c?(c.Rg>=0?'pos':'neg'):'');
     set('pln', c?fmt$2(c.net):'—', c?(c.net>=0?'pos':'neg'):'');
     set('rn',  c?(c.R>=0?'+':'')+c.R.toFixed(2)+'R net':'');
+    const sn2 = stopNow(t);
+    if(sn2){ set('stp', fmt$2(sn2.net)); set('stpr', sn2.R.toFixed(2)+'R all in'); }
     set('held', c?c.hours.toFixed(1)+'h':'—');
     set('fees', c?fmt$2(c.fees):'—');
     set('flag', liveFlag(L));
