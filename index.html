@@ -1401,32 +1401,82 @@
   // book rather than a spot price that drifts from it. Closing a long lifts the bid and closing
   // a short takes the ask, so "P/L if closed now" uses the side you would actually get out on —
   // the spread is a real cost and is already inside the figure.
-  const OKX_INST = { BTCUSD:'BTC-USDT-SWAP', ETHUSD:'ETH-USDT-SWAP' };
-  const feed = { px:{}, ts:0, ok:false, dead:false, fails:0 };
+  // Each firm is priced where it actually executes. Breakout quotes off centralised-exchange
+  // liquidity, so OKX perpetuals are the reference; Propr routes to Hyperliquid, so a Propr
+  // position must be marked against Hyperliquid's own book, not a different venue's.
+  const FEEDS = {
+    breakout:{ src:'okx', name:'OKX perpetuals', inst:{BTCUSD:'BTC-USDT-SWAP', ETHUSD:'ETH-USDT-SWAP'} },
+    propr:   { src:'hl',  name:'Hyperliquid',    inst:{BTCUSD:'BTC', ETHUSD:'ETH'} }
+  };
+  const feedOf = fk => FEEDS[fk] || FEEDS.breakout;
+  const feed = { px:{}, funding:{}, ts:0, ok:false, dead:false, fails:0, err:null };
   let feedTimer=null;
 
   const openTrades = () => journal.filter(t=>t.status==='open');
-  function feedSymbols(){
-    const set=new Set(openTrades().map(t=>OKX_INST[t.sym]).filter(Boolean));
-    if($('cSym') && OKX_INST[$('cSym').value]) set.add(OKX_INST[$('cSym').value]);
-    return [...set];
+  // which venues need polling: whatever the open positions belong to, plus the one selected
+  function feedSources(){
+    const set=new Set(openTrades().map(t=>(t.firm && FIRMS[t.firm]) ? t.firm : FIRM_KEY));
+    set.add(FIRM_KEY);
+    return [...set].map(feedOf).filter((f,i,a)=>a.findIndex(x=>x.src===f.src)===i);
+  }
+
+  async function fetchOkx(f){
+    const syms=Object.keys(f.inst);
+    const out = await Promise.all(syms.map(sy=>
+      fetch('https://www.okx.com/api/v5/market/ticker?instId='+f.inst[sy], {cache:'no-store'})
+        .then(r=>r.ok ? r.json() : Promise.reject(new Error('HTTP '+r.status)))));
+    const px={}; let got=false;
+    out.forEach((j,i)=>{
+      const d=j && j.data && j.data[0];
+      if(!d || !(+d.last>0)) return;
+      px[syms[i]]={last:+d.last, bid:+d.bidPx||+d.last, ask:+d.askPx||+d.last};
+      got=true;
+    });
+    if(!got) throw new Error('empty');
+    return {px, funding:null};
+  }
+
+  // One call carries the price, the impact bid/ask and the live hourly funding rate, so a Propr
+  // position is marked and costed off the same snapshot rather than a hardcoded baseline.
+  async function fetchHl(f){
+    const j = await fetch('https://api.hyperliquid.xyz/info', {method:'POST', cache:'no-store',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'metaAndAssetCtxs'})})
+      .then(r=>r.ok ? r.json() : Promise.reject(new Error('HTTP '+r.status)));
+    const names=(j[0].universe||[]).map(u=>u.name), ctx=j[1]||[];
+    const px={}, funding={}; let got=false;
+    for(const sy of Object.keys(f.inst)){
+      const i=names.indexOf(f.inst[sy]);
+      if(i<0 || !ctx[i]) continue;
+      const c=ctx[i];
+      const mid=+c.midPx || +c.markPx;
+      if(!(mid>0)) continue;
+      const imp=Array.isArray(c.impactPxs)? c.impactPxs.map(Number) : null;
+      px[sy]={last:mid, bid:(imp&&imp[0])||mid, ask:(imp&&imp[1])||mid};
+      funding[sy]=+c.funding;
+      got=true;
+    }
+    if(!got) throw new Error('empty');
+    return {px, funding};
   }
 
   async function pollFeed(){
-    const ids=feedSymbols();
-    if(!ids.length || feed.dead) return;
+    const srcs=feedSources();
+    if(!srcs.length || feed.dead) return;
     try{
-      const out = await Promise.all(ids.map(id=>
-        fetch('https://www.okx.com/api/v5/market/ticker?instId='+id, {cache:'no-store'})
-          .then(r=>r.ok ? r.json() : Promise.reject(new Error('HTTP '+r.status)))));
-      let got=false;
-      out.forEach(j=>{
-        const d = j && j.data && j.data[0];
-        if(!d || !(+d.last>0)) return;
-        feed.px[d.instId] = {last:+d.last, bid:+d.bidPx||+d.last, ask:+d.askPx||+d.last};
-        got=true;
+      const got = await Promise.all(srcs.map(f=>(f.src==='hl'?fetchHl:fetchOkx)(f).then(r=>[f,r])));
+      got.forEach(([f,r])=>{
+        feed.px[f.src]=r.px;
+        if(r.funding) feed.funding[f.src]=r.funding;
       });
-      if(!got) throw new Error('empty');
+      // Hyperliquid funding moves with the book, so Propr's holding cost follows it live rather
+      // than sitting on the 0.03%/day interest baseline
+      const hf=feed.funding.hl;
+      if(hf){
+        const sy=$('cSym') ? $('cSym').value : 'BTCUSD';
+        const hr=hf[sy]!=null ? hf[sy] : hf.BTCUSD;
+        if(hr!=null && isFinite(hr)) FIRMS.propr.financing.daily = hr*24;
+        if(FIRM_KEY==='propr') FIN_DAILY = FIRMS.propr.financing.daily;
+      }
       feed.ok=true; feed.fails=0; feed.ts=Date.now();
       onFeed();
     }catch(e){
@@ -1452,7 +1502,11 @@
 
   const STALE_MS = 30000;
   const feedStale = () => !feed.ok || (Date.now()-feed.ts) > STALE_MS;
-  const quoteFor = t => feed.px[OKX_INST[t.sym]] || null;
+  function quoteFor(t){
+    const f = feedOf((t.firm && FIRMS[t.firm]) ? t.firm : FIRM_KEY);
+    const book = feed.px[f.src];
+    return (book && book[t.sym]) || null;
+  }
   function livePx(t){
     const q=quoteFor(t);
     if(!q) return null;
@@ -1472,7 +1526,7 @@
     const bar=$('feedBar'); if(!bar) return;
     if(feed.dead || (!feed.ok && feed.fails>0)){
       bar.className='feedbar off';
-      bar.innerHTML='<span class="fdot"></span><span>OKX unreachable from this page — '+
+      bar.innerHTML='<span class="fdot"></span><span>Price feed unreachable from this page — '+
         '<b>'+esc(feed.err||'no response')+'</b> after '+feed.fails+' attempt'+(feed.fails===1?'':'s')+'. '+
         'A published artifact is sandboxed against outbound requests; the local copy '+
         '(<b>Downloads\Trading\Open Breakout Tracker.cmd</b>) has the live feed. '+
@@ -1488,10 +1542,20 @@
     }
     const age=Math.max(0,Math.round((Date.now()-feed.ts)/1000));
     const stale=feedStale();
-    const parts=Object.entries(feed.px).map(([id,q])=>
-      '<span><span class="fsrc">'+id+'</span> <b>'+px6(q.last)+'</b></span>');
+    const parts=[];
+    feedSources().forEach(f=>{
+      const book=feed.px[f.src]; if(!book) return;
+      parts.push('<span class="fsrc">'+esc(f.name)+'</span>');
+      Object.keys(book).forEach(sy=>parts.push('<span>'+sy.replace('USD','')+' <b>'+px6(book[sy].last)+'</b></span>'));
+      const hf=feed.funding[f.src];
+      if(hf){
+        const sy=$('cSym') ? $('cSym').value : 'BTCUSD';
+        const hr=hf[sy]!=null?hf[sy]:hf.BTCUSD;
+        if(hr!=null) parts.push('<span class="fsrc">funding '+(hr*24*100).toFixed(3)+'%/day</span>');
+      }
+    });
     bar.className='feedbar '+(stale?'off':'on');
-    bar.innerHTML='<span class="fdot"></span><span class="fsrc">OKX perpetuals</span>'+parts.join('')+
+    bar.innerHTML='<span class="fdot"></span>'+parts.join('')+
       '<span class="fage">'+(stale ? 'stale · '+(age<90?age+'s':Math.round(age/60)+'m')+' old, tab was in the background'
                                    : (age<2?'just now':age+'s ago'))+'</span>';
   }
@@ -3043,6 +3107,7 @@
   $('firm').addEventListener('change',()=>{
     applyFirm($('firm').value);
     renderFirmUI();
+    feed.dead=false; feed.fails=0; pollFeed();   // the new firm prices off a different venue
     updateRuleLock(); guardClassic200k(); updateFee(); applyAutoRisk();
     stampClock(); saveState();
     syncCheckerToday(); renderChecker(); renderLive(); renderJournal();
