@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="425914c · 1 Sept 2026, 21:12">
+<meta name="build" content="68ff37a · 2 Sept 2026, 08:21">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -309,7 +309,6 @@
   .ltrack .mk.best{background:var(--accent); width:3px; height:22px; top:-7px; border-radius:1px}
   .loginfill{display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted)}
   .loginfill select{width:auto; flex:none; font-size:12px; padding:4px 6px}
-  .lpeak{display:block; font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--accent); margin-top:2px}
   .lsub{display:block; font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--muted); margin-top:2px}
   .ltrack .cap{position:absolute; top:15px; font-size:11px; font-weight:600; color:var(--muted);
                font-family:"IBM Plex Mono",monospace; white-space:nowrap; max-width:48%; overflow:hidden}
@@ -1733,8 +1732,7 @@
       '<div class="lgrid">'+
         priceCell(t)+
         '<div><span class="lk" data-out="pllabel-'+id+'">'+(locked?(t.alerted==='target'?'P/L at your target':'P/L at your stop'):'P/L if closed now')+'</span><span class="lv '+(c&&c.gross>=0?'pos':c?'neg':'')+'" data-out="pl-'+id+'">'+(c?fmt$2(c.gross):'—')+'</span><span class="lsub">before costs</span></div>'+
-        '<div><span class="lk" data-out="rlabel-'+id+'">'+(locked?'R locked in':'R so far')+'</span><span class="lv '+(c&&c.Rg>=0?'pos':c?'neg':'')+'" data-out="rg-'+id+'">'+(c?(c.Rg>=0?'+':'')+c.Rg.toFixed(2)+'R':'—')+'</span>'+
-          '<span class="lpeak" data-out="peak-'+id+'">'+peakLabel(t,c)+'</span></div>'+
+        '<div><span class="lk" data-out="rlabel-'+id+'">'+(locked?'R locked in':'R so far')+'</span><span class="lv '+(c&&c.Rg>=0?'pos':c?'neg':'')+'" data-out="rg-'+id+'">'+(c?(c.Rg>=0?'+':'')+c.Rg.toFixed(2)+'R':'—')+'</span></div>'+
         '<div><span class="lk">Held</span><span class="lv" data-out="held-'+id+'">'+(c?c.hours.toFixed(1)+'h':'—')+'</span></div>'+
         '<div><span class="lk" data-out="feelabel-'+id+'">'+(locked?'Costs':'Costs so far')+'</span><span class="lv" data-out="fees-'+id+'">'+(c?fmt$2(c.fees):'—')+'</span></div>'+
         '<div><span class="lk">Net after costs</span><span class="lv '+plCls(c)+'" data-out="pln-'+id+'">'+(c?fmt$2(c.net):'—')+'</span>'+
@@ -1756,16 +1754,6 @@
   // the part of 1R that is pure price move — the rest is what the round trip costs
   const priceRiskOf = t => (+t.units>0 && +t.entry>0 && +t.stop>0)
     ? +t.units*Math.abs(+t.stop-+t.entry) : null;
-  // how good it got, shown only once the price has actually pulled back from it
-  function peakLabel(t, c){
-    if(!c || t.best==null || !priceable(t)) return '';
-    const dir = t.dir==='short' ? -1 : 1;
-    const px = markFor(t);
-    if(px==null || (t.best-px)*dir <= 0) return '';
-    const bc = settleCalc(t, +t.best, Date.now(), 'taker');
-    return 'peak '+(bc.R>=0?'+':'')+bc.R.toFixed(2)+'R';
-  }
-
   // A row is either following OKX or being typed into. When it follows, the price is a readout —
   // there is nothing to fill in — and it is rewritten on every tick. Switching between the two
   // changes the markup, so the mode is stamped on the row and a change forces a full re-render.
@@ -1892,8 +1880,6 @@
       if(g.b!=null){ best.style.left=(g.b*100).toFixed(1)+'%';
                      best.title='best reached '+px6(g.bestPx); }
     }
-    const pk=row.querySelector('[data-out="peak-'+id+'"]');
-    if(pk) pk.textContent = peakLabel(t, c);
   }
 
   // ================= journal =================
