@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="6c266e6 · 1 Sept 2026, 16:17">
+<meta name="build" content="75c4bf3 · 1 Sept 2026, 16:23">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -934,8 +934,9 @@
       // Breakout charges its own financing, both directions, whichever way you are positioned.
       financing:{kind:'flat', daily:0.00033, blockHours:4, directional:false},
       dayRollMin:30,                        // the daily limit resets at 00:30 UTC
+      // [max notional, max leverage] from breakoutprop.com/symbols, checked 1 Sep 2026
       symbols:{ BTCUSD:[1000000,10], ETHUSD:[1000000,5] },
-      platforms:[['bo','Breakout Terminal'],['dx','DXtrade']],
+      platforms:[['bo','Breakout Terminal']],   // DXtrade withdrawn; finFor still handles 'dx' if it returns
       capNote:'Classic tops out at $100K.'
     },
     propr: {
@@ -964,6 +965,9 @@
       // from Hyperliquid when it can be reached.
       financing:{kind:'funding', daily:0.0003, blockHours:1, directional:true},
       dayRollMin:0,                         // the daily limit resets at 00:00 UTC
+      // propr.xyz/rules section 12 lists BTC, ETH and SOL at 10x. A graphic further down that
+      // same page says 5x for BTC and ETH — the tables are used here, being the more specific of
+      // the two, but it is worth confirming in the dashboard before sizing near the cap.
       symbols:{ BTCUSD:[1000000,10], ETHUSD:[1000000,10] },
       platforms:[['hl','Hyperliquid']],
       capNote:'All sizes available on every plan. Funded balances are capped at $300K in total.'
