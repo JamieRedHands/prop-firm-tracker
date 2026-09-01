@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="5175e56 · 1 Sept 2026, 17:53">
+<meta name="build" content="1c27e2f · 1 Sept 2026, 17:58">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -2830,7 +2830,7 @@
     const cDir = tgt>0 ? (tgt>entry?'long':'short') : (stop<entry?'long':'short');
     const fin=finRate(cDir);
     const sr=strategyRisk(st);
-    const risk=sr.risk;
+    let risk=sr.risk;
 
     const paperNow = isPaper(st.rules.plan);
     $('cContext').innerHTML =
@@ -2849,7 +2849,14 @@
     const slipPrice = entry*bps/10000;
     const costPerUnit = entryComm()*entry + stopComm()*stop + fin*entry;   // the losing leg: stop is always taker
     const lossPerUnit = stopDist + costPerUnit;
-    const units = lossPerUnit>0 ? risk/lossPerUnit : 0;
+    const wantUnits = lossPerUnit>0 ? risk/lossPerUnit : 0;
+    const maxNotional = Math.min(symInfo[0], st.equity*symInfo[1]);
+    const capUnits = entry>0 ? maxNotional/entry : Infinity;
+    const units = Math.min(wantUnits, capUnits);
+    const sizeCapped = wantUnits>0 && units < wantUnits*(1-1e-9);
+    const capBy = sizeCapped ? (symInfo[0] <= st.equity*symInfo[1] ? 'the '+fmt$(symInfo[0])+' position cap'
+                                                                  : 'your '+symInfo[1]+'x leverage') : null;
+    if(sizeCapped) risk = units*lossPerUnit;                   // what the allowed size really risks
     const cleanLoss = units*lossPerUnit;                       // equals risk, by construction
     const slippedStop = stop + (stop>entry ? slipPrice : -slipPrice);
     const slipCost = units*slipPrice;                          // the extra, drawn from the buffer
@@ -2897,7 +2904,7 @@
     $('cSize').textContent = units>0 ? units.toLocaleString(undefined,{maximumFractionDigits:6}) : '—';
     $('cSize').className='ev';
     $('cSizeSub').textContent = units>0
-      ? `units of ${sym} — type this into Breakout · stop ${fmt$2(stopDist)} away · a stop at your price costs exactly ${fmt$2(risk)}`
+      ? `units of ${sym} — type this into ${FIRM.name} · stop ${fmt$2(stopDist)} away · a stop at your price costs exactly ${fmt$2(risk)}`
       : 'set entry, stop and a risk figure';
     const beR = p.winRate>0 ? (1-p.winRate)/p.winRate : Infinity;
     // Where the chart ratio goes. 1R is the whole budgeted risk, but only part of that budget is
@@ -2908,7 +2915,9 @@
     const feeR = gapFee + gapFeeWin;
 
     $('cRiskOut').textContent = fmt$2(risk);
-    $('cRiskSub').textContent = `= 1R at your stop · +${fmt$2(slipCost)} if it slips ${bps} bps`;
+    $('cRiskSub').textContent = sizeCapped
+      ? `= 1R · capped by ${capBy}, down from ${fmt$2(sr.risk)}`
+      : `= 1R at your stop · +${fmt$2(slipCost)} if it slips ${bps} bps`;
     $('cNetR').textContent = tgt>0 ? grossRR.toFixed(2)+'R' : '—';
     $('cNetR').className = 'v ' + (!(tgt>0) ? '' : netR>=beR*1.25 ? 'pos' : netR>=beR ? 'warn' : 'neg');
     $('cNetRSub').textContent = tgt>0 ? `${netR.toFixed(2)}R net · ${fmt$2(netWin)}` : 'set a target';
@@ -3050,13 +3059,14 @@
     else checks.push({s:'ok',t:'Reward clears your breakeven after fees',d:`${netR.toFixed(2)}R net vs ${beR.toFixed(2)}R needed.`});
 
     const maxSize=symInfo[0], lev=symInfo[1], marginMax=st.equity*lev;
-    const overCap = notional>maxSize, overLev = notional>marginMax;
-    if(overCap) checks.push({s:'fail',t:`Over the ${sym} position cap`,d:`${fmt$(notional)} notional vs the ${fmt$(maxSize)} maximum.`});
-    if(overLev) checks.push({s:'fail',t:'Exceeds available leverage',d:`${fmt$(notional)} notional is above the ${lev}× cap on ${sym} (${fmt$(marginMax)} max).`});
-    if(!overCap && !overLev){
-      if(notional>maxSize*0.8) checks.push({s:'warn',t:'Near the symbol position cap',d:`${fmt$(notional)} of ${fmt$(maxSize)} allowed.`});
-      else checks.push({s:'ok',t:'Within size and leverage limits',d:`${fmt$(notional)} notional · ${(notional/Math.max(st.equity,1)).toFixed(2)}× of equity · ${lev}× allowed on ${sym}.`});
+    if(sizeCapped){
+      checks.push({s:'warn', t:'Size capped by '+capBy,
+        d:`Your budget wanted ${(+wantUnits).toFixed(4)} units (${fmt$(wantUnits*entry)} notional). `+
+          `${capBy.charAt(0).toUpperCase()+capBy.slice(1)} allows ${(+units).toFixed(4)} — ${fmt$(notional)}. `+
+          `So this trade risks ${fmt$2(risk)}, not the ${fmt$2(sr.risk)} your daily budget allowed.`});
     }
+    else if(notional>maxSize*0.8) checks.push({s:'warn',t:'Near the symbol position cap',d:`${fmt$(notional)} of ${fmt$(maxSize)} allowed.`});
+    else checks.push({s:'ok',t:'Within size and leverage limits',d:`${fmt$(notional)} notional · ${(notional/Math.max(st.equity,1)).toFixed(2)}× of equity · ${lev}× allowed on ${sym}.`});
 
     if(sr.capped) checks.push({s:'warn',t:'Risk trimmed to fit your remaining room',d:`Cut to ${fmt$2(risk)} so the trade stays inside the limits.`});
 
