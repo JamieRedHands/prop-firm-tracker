@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="695a066 · 1 Sept 2026, 21:01">
+<meta name="build" content="425914c · 1 Sept 2026, 21:12">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -307,6 +307,8 @@
   .ltrack .fill.behind{background:var(--bad)}   /* the price is on the wrong side of your entry */
   .ltrack .mk{position:absolute; top:-4px; width:2px; height:16px; background:var(--muted); transform:translateX(-1px)}
   .ltrack .mk.best{background:var(--accent); width:3px; height:22px; top:-7px; border-radius:1px}
+  .loginfill{display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted)}
+  .loginfill select{width:auto; flex:none; font-size:12px; padding:4px 6px}
   .lpeak{display:block; font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--accent); margin-top:2px}
   .lsub{display:block; font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--muted); margin-top:2px}
   .ltrack .cap{position:absolute; top:15px; font-size:11px; font-weight:600; color:var(--muted);
@@ -762,6 +764,12 @@
 
       <div class="btnrow" style="margin:-4px 0 0">
         <button class="btn" id="cLog" type="button">Log this trade to journal</button>
+        <label class="loginfill">entered at
+          <select id="cEnteredAt">
+            <option value="maker">limit</option>
+            <option value="taker">market</option>
+          </select>
+        </label>
         <span class="hint" id="cLogMsg" style="margin:0"></span>
       </div>
 
@@ -907,12 +915,15 @@
   const FILL_STYLES = {
     mm:{label:'Limit in, limit target', entry:'maker', target:'maker'},
     mt:{label:'Limit in, market out',   entry:'maker', target:'taker'},
+    tm:{label:'Market in, limit target',entry:'taker', target:'maker'},
     tt:{label:'Market in, market out',  entry:'taker', target:'taker'}
   };
   // A trade is settled on the style it was SIZED with, not whatever the dropdown says today —
   // otherwise changing the control retroactively re-prices trades already in the record.
   const styleOf = k => FILL_STYLES[k] || FILL_STYLES.mm;
   const fillStyle = (k) => styleOf(k || ($('cFill') ? $('cFill').value : 'mm'));
+  const fillKeyFor = (entry, target) =>
+    Object.keys(FILL_STYLES).find(k=>FILL_STYLES[k].entry===entry && FILL_STYLES[k].target===target) || 'mm';
   const entryComm  = (k) => commRate(fillStyle(k).entry);
   const targetComm = (k) => commRate(fillStyle(k).target);
   const stopComm   = () => commRate('taker');
@@ -1372,8 +1383,10 @@
     const bh = FIRM.financing.kind==='funding' ? 1 : (plat==='dx' ? 24 : 4);
     const blocks = Math.ceil(hours/bh);
     const gross  = units*(exitPx-entry)*dir;
-    const feeIn  = units*entry*entryComm(t.fill);
-    const feeOut = units*exitPx*(exitKind==='maker' ? targetComm(t.fill) : commRate('taker'));
+    const inKind  = fillStyle(t.fill).entry;
+    const outKind = exitKind==='maker' ? fillStyle(t.fill).target : 'taker';
+    const feeIn  = units*entry*commRate(inKind);
+    const feeOut = units*exitPx*commRate(outKind);
     const fin    = units*entry*finFor(hours, plat, t.dir, t.sym);
     const net    = gross - feeIn - feeOut - fin;
     // Slippage is measured against whichever level the fill landed nearest — that is the one
@@ -1387,6 +1400,7 @@
     const slipPx = ref!=null ? (exitPx-ref)*dir : 0;
     applyFirm(save);
     return {units, entry, dir, hours, blocks, bh, plat, gross, feeIn, feeOut, fin,
+            entryKind:inKind, exitKind:outKind,
             fees: feeIn+feeOut+fin, net, R: t.risk>0 ? net/t.risk : 0, Rg: t.risk>0 ? gross/t.risk : 0,
             ref, refName, slipPx, slip$: units*slipPx};
   }
@@ -1580,6 +1594,8 @@
     const px = markFor(t);
     return px==null ? null : {px, kind:'taker', ms:Date.now(), locked:false};
   }
+  // the rate a leg actually paid, read back off the money rather than assumed
+  const pctOf = (fee, notional) => notional>0 ? (fee/notional*100).toFixed(3)+'%' : '—';
   const px6 = v => v>=1000 ? v.toLocaleString(undefined,{maximumFractionDigits:1})
                            : v.toLocaleString(undefined,{maximumFractionDigits:4});
 
@@ -1961,7 +1977,10 @@
     const px = how==='win'  ? (+t.target||+t.mark||+t.entry||'')
              : how==='loss' ? (+t.stop  ||+t.mark||+t.entry||'')
              : (+t.mark||+t.entry||'');
-    settling = {id, how, exit:px||'', when:dtLocal(Date.now()), override:''};
+    const filledAt = (t.alerted && t.alertAt &&
+                      ((how==='win' && t.alerted==='target') || (how==='loss' && t.alerted==='stop')))
+                     ? Date.parse(t.alertAt) : Date.now();
+    settling = {id, how, exit:px||'', when:dtLocal(filledAt), override:''};
     // the panel lives on the Journal tab, so bring it into view wherever it was triggered from
     showView('view-jrn');
     renderJournal(); renderJournalStats();
@@ -2039,10 +2058,14 @@
     box.innerHTML =
       '<div class="srow"><span>Gross move · '+(+t.units).toLocaleString(undefined,{maximumFractionDigits:6})+' units</span>'+
         '<span class="'+(c.gross>=0?'pos':'neg')+'">'+fmt$2(c.gross)+'</span></div>'+
-      '<div class="srow"><span>Entry commission · 0.04%</span><span class="neg">−'+fmt$2(c.feeIn)+'</span></div>'+
-      '<div class="srow"><span>Exit commission · 0.04%</span><span class="neg">−'+fmt$2(c.feeOut)+'</span></div>'+
-      '<div class="srow"><span>Financing · '+c.hours.toFixed(1)+'h held = '+c.blocks+' '+(c.bh===1?'hour':c.bh===24?'day':'4h block')+(c.blocks===1?'':'s')+'</span>'+
-        '<span class="neg">−'+fmt$2(c.fin)+'</span></div>'+
+      '<div class="srow"><span>Entry commission · '+pctOf(c.feeIn, t.units*t.entry)+' '+c.entryKind+'</span>'+
+        '<span class="neg">−'+fmt$2(c.feeIn)+'</span></div>'+
+      '<div class="srow"><span>Exit commission · '+pctOf(c.feeOut, t.units*px)+' '+c.exitKind+'</span>'+
+        '<span class="neg">−'+fmt$2(c.feeOut)+'</span></div>'+
+      // funding runs both ways, so a credit must not be printed as a negative cost
+      '<div class="srow"><span>Financing · '+c.hours.toFixed(1)+'h held = '+c.blocks+' '+(c.bh===1?'hour':c.bh===24?'day':'4h block')+(c.blocks===1?'':'s')+
+        (c.fin<0?' · paid to you':'')+'</span>'+
+        '<span class="'+(c.fin<0?'pos':'neg')+'">'+(c.fin<0?'+':'−')+fmt$2(Math.abs(c.fin))+'</span></div>'+
       '<div class="srow tot"><span>'+(ov!=null?'Your broker figure':'Net P/L')+'</span>'+
         '<span class="'+(net>=0?'pos':'neg')+'">'+fmt$2(net)+' · '+(R>=0?'+':'')+R.toFixed(2)+'R</span></div>'+
       (ov!=null && Math.abs(ov-c.net)>0.5
@@ -2053,8 +2076,7 @@
           ' your '+c.refName+' of '+c.ref+' — '+(c.slipPx>=0?'worth ':'a cost of ')+fmt$2(Math.abs(c.slip$))+'.'+
           (planned!=null ? ' The checker budgeted '+fmt$2(planned)+' of costs; this trade paid '+fmt$2(c.fees)+'.' : '')+'</div>'
         : planned!=null
-          ? '<div class="srow note">Filled exactly at your '+(c.refName||'level')+', so no slippage. '+
-            'The checker budgeted '+fmt$2(planned)+' of costs; this trade paid '+fmt$2(c.fees)+'.</div>'
+          ? '<div class="srow note">The checker budgeted '+fmt$2(planned)+' of costs; this trade paid '+fmt$2(c.fees)+'.</div>'
           : '');
   }
 
@@ -3291,7 +3313,10 @@
   $('cStrat').addEventListener('change',updateStrat);
   ['cMaxTrades','cUsePct'].forEach(id=>$(id).addEventListener('input',renderChecker));
   $('cCond').addEventListener('change',renderChecker);
-  $('cFill').addEventListener('change',()=>{ renderChecker(); debounced(); });
+  $('cFill').addEventListener('change',()=>{
+    if($('cEnteredAt')) $('cEnteredAt').value = fillStyle().entry;   // follow the plan until overridden
+    renderChecker(); debounced();
+  });
 
   $('cAcctSel').addEventListener('change',()=>{
     const v=$('cAcctSel').value;
@@ -3314,7 +3339,8 @@
       acctId:(a?a.id:null),                     // the account this trade's limits belong to
       sym:lastPlanned.sym, dir:lastPlanned.dir, risk:Math.round(lastPlanned.risk*100)/100,
       pl:0, acct:(a?a.size:+$('acct').value), acctLabel:(a?a.label:null), status:'open',
-      paper: isPaper(a ? a.plan : $('plan').value), plat:$('cPlat').value, firm:FIRM_KEY, fill:$('cFill').value,
+      paper: isPaper(a ? a.plan : $('plan').value), plat:$('cPlat').value, firm:FIRM_KEY,
+      fill: fillKeyFor($('cEnteredAt').value, fillStyle().target),
       entry:lastPlanned.entry, stop:lastPlanned.stop, target:lastPlanned.tgt,
       units:lastPlanned.units, plannedR:lastPlanned.netR, plannedGrossR:lastPlanned.grossRR, plannedFees:lastPlanned.fees,
       allInLoss:lastPlanned.allInLoss,
