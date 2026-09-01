@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="df998ba · 1 Sept 2026, 16:00">
+<meta name="build" content="15e8e7a · 1 Sept 2026, 16:08">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -1197,6 +1197,7 @@
         t.acctId = a ? a.id : null;
         dirty=true;
       }
+      if(!t.firm || !FIRMS[t.firm]){ t.firm='breakout'; dirty=true; }
       if(t.pinned){ t.pinned=false; dirty=true; }
       // a mark nowhere near the entry is a slip of the keyboard, not a price
       if(t.mark!=null && +t.entry>0 && Math.abs(+t.mark - +t.entry) > +t.entry*0.5){ t.mark=null; dirty=true; }
@@ -1335,7 +1336,7 @@
     const units=+t.units||0, entry=+t.entry||0, dir = t.dir==='short' ? -1 : 1;
     const hours = Math.max(0, (exitMs - openedMs(t))/3600000);
     const plat = t.plat || 'bo';
-    const save=FIRM_KEY; if(t.firm && FIRMS[t.firm]) applyFirm(t.firm);
+    const save=FIRM_KEY; applyFirm(firmOf(t));
     const bh = FIRM.financing.kind==='funding' ? 1 : (plat==='dx' ? 24 : 4);
     const blocks = Math.ceil(hours/bh);
     const gross  = units*(exitPx-entry)*dir;
@@ -1430,7 +1431,7 @@
   const openTrades = () => journal.filter(t=>t.status==='open');
   // which venues need polling: whatever the open positions belong to, plus the one selected
   function feedSources(){
-    const set=new Set(openTrades().map(t=>(t.firm && FIRMS[t.firm]) ? t.firm : FIRM_KEY));
+    const set=new Set(openTrades().map(firmOf));
     set.add(FIRM_KEY);
     return [...set].map(feedOf).filter((f,i,a)=>a.findIndex(x=>x.src===f.src)===i);
   }
@@ -1518,7 +1519,7 @@
   const STALE_MS = 30000;
   const feedStale = () => !feed.ok || (Date.now()-feed.ts) > STALE_MS;
   function quoteFor(t){
-    const f = feedOf((t.firm && FIRMS[t.firm]) ? t.firm : FIRM_KEY);
+    const f = feedOf(firmOf(t));
     const book = feed.px[f.src];
     return (book && book[t.sym]) || null;
   }
@@ -1649,7 +1650,7 @@
       '<div class="lhead"><b>'+esc(t.sym||'—')+' '+dirTag(t)+'</b>'+
         '<span class="lacct">'+(t.entry? 'entry '+t.entry+' · ':'')+fmt$(t.risk)+' at risk · opened '+
           esc(t.opened ? melDateTime(Date.parse(t.opened)) : (t.date||''))+
-          ' · '+esc((t.firm && FIRMS[t.firm]) ? FIRMS[t.firm].name : FIRM.name)+'</span>'+
+          ' · '+esc(FIRMS[firmOf(t)].name)+'</span>'+
         '<span class="lflag" data-out="flag-'+id+'">'+liveFlag(L)+'</span></div>'+
       '<div class="lgrid">'+
         priceCell(t)+
@@ -1672,7 +1673,8 @@
   // there is nothing to fill in — and it is rewritten on every tick. Switching between the two
   // changes the markup, so the mode is stamped on the row and a change forces a full re-render.
   const liveMode = t => (livePx(t)!=null && !t.pinned) ? 'live' : 'manual';
-  const venueOf = t => feedOf((t.firm && FIRMS[t.firm]) ? t.firm : FIRM_KEY);
+  const firmOf  = t => (t.firm && FIRMS[t.firm]) ? t.firm : 'breakout';
+  const venueOf = t => feedOf(firmOf(t));
   const venueTag = t => venueOf(t).src==='hl' ? 'HL' : 'OKX';
   function chipHtml(t){
     if(liveMode(t)==='live')
