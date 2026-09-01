@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="be2f4fc · 1 Sept 2026, 16:34">
+<meta name="build" content="ae3507e · 1 Sept 2026, 17:40">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -306,7 +306,9 @@
   .ltrack .fill{position:absolute; top:0; bottom:0; border-radius:4px; background:var(--good); opacity:.8}
   .ltrack .fill.behind{background:var(--bad)}   /* the price is on the wrong side of your entry */
   .ltrack .mk{position:absolute; top:-4px; width:2px; height:16px; background:var(--muted); transform:translateX(-1px)}
-  .ltrack .mk.now{background:var(--accent); width:3px; height:20px; top:-6px}
+  .ltrack .mk.now{background:var(--ink); width:2px; height:18px; top:-5px}
+  .ltrack .mk.best{background:var(--accent); width:3px; height:22px; top:-7px; border-radius:1px}
+  .lpeak{display:block; font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--accent); margin-top:2px}
   .ltrack .cap{position:absolute; top:15px; font-size:11px; font-weight:600; color:var(--muted);
                font-family:"IBM Plex Mono",monospace; white-space:nowrap; max-width:48%; overflow:hidden}
   .ltrack .cap.l{left:0; transform:none; color:var(--bad)}
@@ -1596,9 +1598,21 @@
 
   // Every 5s: refresh the readouts, and raise a standing alert the first time a position
   // touches its stop or its target so a level reached while you were away is not lost.
+  // The high-water mark only moves on a price the market actually printed. A hand-typed mark is
+  // a what-if, so it never sets the peak — otherwise one fat-fingered number would permanently
+  // claim the trade reached a level it never did.
+  function noteBest(t){
+    const lp=livePx(t);
+    if(lp==null || !(lp>0)) return false;
+    const dir = t.dir==='short' ? -1 : 1;
+    if(t.best==null || (lp - t.best)*dir > 0){ t.best=lp; return true; }
+    return false;
+  }
+
   function onFeed(){
-    let structural=false;
+    let structural=false, moved=false;
     openTrades().forEach(t=>{
+      if(noteBest(t)) moved=true;
       const px=markFor(t);
       if(px==null) return;
       const L=liveState(t,px);
@@ -1609,7 +1623,7 @@
       }
     });
     if(structural){ saveJournal(); renderLive(); }
-    else openTrades().forEach(refreshLive);
+    else { if(moved) saveJournal(); openTrades().forEach(refreshLive); }
     renderFeedBar();
   }
 
@@ -1673,7 +1687,8 @@
       '<div class="lgrid">'+
         priceCell(t)+
         '<div><span class="lk">P/L if closed now</span><span class="lv '+plCls(c)+'" data-out="pl-'+id+'">'+(c?fmt$2(c.net):'—')+'</span></div>'+
-        '<div><span class="lk">R so far</span><span class="lv '+plCls(c)+'" data-out="r-'+id+'">'+(c?(c.R>=0?'+':'')+c.R.toFixed(2)+'R':'—')+'</span></div>'+
+        '<div><span class="lk">R so far</span><span class="lv '+plCls(c)+'" data-out="r-'+id+'">'+(c?(c.R>=0?'+':'')+c.R.toFixed(2)+'R':'—')+'</span>'+
+          '<span class="lpeak" data-out="peak-'+id+'">'+peakLabel(t,c)+'</span></div>'+
         '<div><span class="lk">Held</span><span class="lv" data-out="held-'+id+'">'+(c?c.hours.toFixed(1)+'h':'—')+'</span></div>'+
         '<div><span class="lk">Costs so far</span><span class="lv" data-out="fees-'+id+'">'+(c?fmt$2(c.fees):'—')+'</span></div>'+
       '</div>'+
@@ -1686,6 +1701,15 @@
       '</div></div>';
   }
   const plCls = c => !c ? '' : (c.net>=0?'pos':'neg');
+  // how good it got, shown only once the price has actually pulled back from it
+  function peakLabel(t, c){
+    if(!c || t.best==null || !priceable(t)) return '';
+    const dir = t.dir==='short' ? -1 : 1;
+    const px = markFor(t);
+    if(px==null || (t.best-px)*dir <= 0) return '';
+    const bc = settleCalc(t, +t.best, Date.now(), 'taker');
+    return 'peak '+(bc.R>=0?'+':'')+bc.R.toFixed(2)+'R';
+  }
 
   // A row is either following OKX or being typed into. When it follows, the price is a readout —
   // there is nothing to fill in — and it is rewritten on every tick. Switching between the two
@@ -1740,7 +1764,10 @@
     const at = x => span>0 ? clamp01((x-stop)*dir/span) : 0;
     const e = at(entry);
     const p = (L && L.nowAt!=null) ? clamp01(L.nowAt) : e;
-    return {e, p, left:Math.min(e,p), width:Math.abs(p-e), ahead:p>=e};
+    // the peak never moves backwards, so it stays put while the fill pulls back to the price
+    const bestPx = (t.best!=null && (t.best-entry)*dir > 0) ? +t.best : null;
+    const b = bestPx!=null ? at(bestPx) : null;
+    return {e, p, b, bestPx, left:Math.min(e,p), width:Math.abs(p-e), ahead:p>=e};
   }
   function track(t, L, id){
     if(!(+t.stop>0 && +t.target>0)) return '<p class="lfoot">No stop and target recorded, so there is nothing to track against.</p>';
@@ -1750,6 +1777,9 @@
         '%; width:'+(g.width*100).toFixed(1)+'%"></div>'+
       '<div class="mk" data-out="entry-'+id+'" style="left:'+(g.e*100).toFixed(1)+'%"></div>'+
       '<div class="mk now" data-out="now-'+id+'" style="left:'+(g.p*100).toFixed(1)+'%"></div>'+
+      '<div class="mk best" data-out="best-'+id+'"'+(g.b==null?' hidden':'')+
+        ' style="left:'+((g.b==null?g.e:g.b)*100).toFixed(1)+'%" title="best reached '+
+        (g.bestPx!=null?px6(g.bestPx):'—')+'"></div>'+
       '<div class="cap l">stop '+t.stop+'</div>'+
       '<div class="cap r">target '+t.target+'</div></div>';
   }
@@ -1782,6 +1812,14 @@
     if(fill){ fill.style.left=(g.left*100).toFixed(1)+'%'; fill.style.width=(g.width*100).toFixed(1)+'%';
               fill.classList.toggle('behind', !g.ahead); }
     if(now)  now.style.left = (g.p*100).toFixed(1)+'%';
+    const best=row.querySelector('[data-out="best-'+id+'"]');
+    if(best){
+      best.hidden = g.b==null;
+      if(g.b!=null){ best.style.left=(g.b*100).toFixed(1)+'%';
+                     best.title='best reached '+px6(g.bestPx); }
+    }
+    const pk=row.querySelector('[data-out="peak-'+id+'"]');
+    if(pk) pk.textContent = peakLabel(t, c);
   }
 
   // ================= journal =================
@@ -1987,7 +2025,7 @@
       t.pl=ov; t.dateClosed=tradingDay();
     }
     t.status='closed';
-    t.mark=null;
+    t.mark=null; t.best=null;
     settling=null;
     saveJournal(); renderJournal(); renderJournalStats(); syncCheckerToday(); renderLive(); renderChecker();
     if($('useTracked').checked){ applyTracked(); debounced(); }
