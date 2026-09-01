@@ -583,7 +583,7 @@
 
         <div class="cmpsplit">
           <h4>Every option, compared</h4>
-          <p class="sub" id="cmpSub">Every plan and size at every firm. Average profit per eval bought, with return on the fee underneath. Your pick is ringed in amber; anything your bankroll cannot safely reach is dimmed.</p>
+          <p class="sub" id="cmpSub">Every plan and size at every firm, all at the 80/20 split they both offer — comparing a paid 90/10 against a flat 80/20 would not be like for like. Average profit per eval bought, with return on the fee underneath. Your pick is ringed in amber; anything your bankroll cannot safely reach is dimmed.</p>
           <div id="cmpTables"></div>
           <div class="hint" id="cmpFoot">—</div>
         </div>
@@ -897,9 +897,12 @@
     mt:{label:'Limit in, market out',   entry:'maker', target:'taker'},
     tt:{label:'Market in, market out',  entry:'taker', target:'taker'}
   };
-  const fillStyle = () => FILL_STYLES[$('cFill') ? $('cFill').value : 'mm'] || FILL_STYLES.mm;
-  const entryComm  = () => commRate(fillStyle().entry);
-  const targetComm = () => commRate(fillStyle().target);
+  // A trade is settled on the style it was SIZED with, not whatever the dropdown says today —
+  // otherwise changing the control retroactively re-prices trades already in the record.
+  const styleOf = k => FILL_STYLES[k] || FILL_STYLES.mm;
+  const fillStyle = (k) => styleOf(k || ($('cFill') ? $('cFill').value : 'mm'));
+  const entryComm  = (k) => commRate(fillStyle(k).entry);
+  const targetComm = (k) => commRate(fillStyle(k).target);
   const stopComm   = () => commRate('taker');
 
   // ================= prop firms =================
@@ -1319,17 +1322,19 @@
   }
   const priceable = t => (+t.units>0 && +t.entry>0);
 
-  function settleCalc(t, exitPx, exitMs){
+  // exitKind: 'maker' only when the trade actually rested at its target. A stop crosses the
+  // book, and so does marking an open position to what you would get closing it right now, so
+  // both are taker — assuming otherwise would quietly flatter every live P/L on screen.
+  function settleCalc(t, exitPx, exitMs, exitKind){
     const units=+t.units||0, entry=+t.entry||0, dir = t.dir==='short' ? -1 : 1;
     const hours = Math.max(0, (exitMs - openedMs(t))/3600000);
     const plat = t.plat || 'bo';
-    const blocks = plat==='dx' ? Math.ceil(hours/24) : Math.ceil(hours/4);
-    const gross  = units*(exitPx-entry)*dir;
-    // the exit is only a maker fill if it rested at the target; a stop or a manual close crosses
     const save=FIRM_KEY; if(t.firm && FIRMS[t.firm]) applyFirm(t.firm);
-    const atTarget = +t.target>0 && Math.abs(exitPx-+t.target) < Math.abs(exitPx-(+t.stop||0));
-    const feeIn  = units*entry*entryComm();
-    const feeOut = units*exitPx*(atTarget ? targetComm() : commRate('taker'));
+    const bh = FIRM.financing.kind==='funding' ? 1 : (plat==='dx' ? 24 : 4);
+    const blocks = Math.ceil(hours/bh);
+    const gross  = units*(exitPx-entry)*dir;
+    const feeIn  = units*entry*entryComm(t.fill);
+    const feeOut = units*exitPx*(exitKind==='maker' ? targetComm(t.fill) : commRate('taker'));
     const fin    = units*entry*finFor(hours, plat, t.dir);
     const net    = gross - feeIn - feeOut - fin;
     // Slippage is measured against whichever level the fill landed nearest — that is the one
@@ -1342,7 +1347,7 @@
     } else if(stop>0){ ref=stop; refName='stop'; }
     const slipPx = ref!=null ? (exitPx-ref)*dir : 0;
     applyFirm(save);
-    return {units, entry, dir, hours, blocks, plat, gross, feeIn, feeOut, fin,
+    return {units, entry, dir, hours, blocks, bh, plat, gross, feeIn, feeOut, fin,
             fees: feeIn+feeOut+fin, net, R: t.risk>0 ? net/t.risk : 0,
             ref, refName, slipPx, slip$: units*slipPx};
   }
@@ -1881,7 +1886,7 @@
     const px = +$('sExit').value||0;
     const ms = tzParse($('sWhen').value) || Date.now();
     if(!(px>0)){ box.innerHTML='<div class="srow note">Enter the exit fill price to price the trade out.</div>'; return; }
-    const c = settleCalc(t, px, ms);
+    const c = settleCalc(t, px, ms, settling.how==='win' ? 'maker' : 'taker');
     const net = ov!=null ? ov : c.net;
     const R = t.risk>0 ? net/t.risk : 0;
     const planned = t.plannedFees!=null ? +t.plannedFees : null;
@@ -1890,7 +1895,7 @@
         '<span class="'+(c.gross>=0?'pos':'neg')+'">'+fmt$2(c.gross)+'</span></div>'+
       '<div class="srow"><span>Entry commission · 0.04%</span><span class="neg">−'+fmt$2(c.feeIn)+'</span></div>'+
       '<div class="srow"><span>Exit commission · 0.04%</span><span class="neg">−'+fmt$2(c.feeOut)+'</span></div>'+
-      '<div class="srow"><span>Financing · '+c.hours.toFixed(1)+'h held = '+c.blocks+' '+(c.plat==='dx'?'day':'4h block')+(c.blocks===1?'':'s')+'</span>'+
+      '<div class="srow"><span>Financing · '+c.hours.toFixed(1)+'h held = '+c.blocks+' '+(c.bh===1?'hour':c.bh===24?'day':'4h block')+(c.blocks===1?'':'s')+'</span>'+
         '<span class="neg">−'+fmt$2(c.fin)+'</span></div>'+
       '<div class="srow tot"><span>'+(ov!=null?'Your broker figure':'Net P/L')+'</span>'+
         '<span class="'+(net>=0?'pos':'neg')+'">'+fmt$2(net)+' · '+(R>=0?'+':'')+R.toFixed(2)+'R</span></div>'+
@@ -1916,7 +1921,7 @@
       const ms=tzParse($('sWhen').value) || Date.now();
       if(!(px>0) && ov==null){ $('sMsg').textContent='Enter the exit price, or the P/L your broker shows.'; return; }
       if(px>0){
-        const c=settleCalc(t,px,ms);
+        const c=settleCalc(t,px,ms, settling.how==='win' ? 'maker' : 'taker');
         t.exit=px;
         t.closedAt=new Date(ms).toISOString();
         t.dateClosed=tradingDay(ms);
@@ -2147,7 +2152,10 @@
     const stopDist=Math.abs(entry-stop), tgtDist=Math.abs(tgt-entry);
     if(entry>0 && stopDist>0 && tgtDist>0){
       const dir = tgt>entry ? 'long' : 'short';
-      const plat = (FIRM.platforms[0]||['bo'])[0];
+      // honour the platform actually selected when this firm offers it; Breakout's DXtrade
+      // charges financing daily rather than per 4h block, which is a different number
+      const has = FIRM.platforms.some(x=>x[0]===$('cPlat').value);
+      const plat = has ? $('cPlat').value : (FIRM.platforms[0]||['bo'])[0];
       const fin = finFor(hold, plat, dir);
       const costStop = entryComm()*entry + stopComm()*stop + fin*entry;
       const costTgt  = entryComm()*entry + targetComm()*tgt  + fin*entry;
@@ -2176,9 +2184,9 @@
     for(const fk of FIRM_KEYS){
       const f=FIRMS[fk], c=cmpAll[fk];
       if(!c) continue;
-      const bestSplit = Math.max(...f.splits.map(x=>x[0]));
-      const splitIdx = bestSplit===90 ? 1 : 0;
-      const splitF = bestSplit/100;
+      const CMP_SPLIT = 80;                       // the one split every firm offers
+      const splitIdx = 0;
+      const splitF = CMP_SPLIT/100;
       for(const k of f.planKeys){
         if(!c[k]) continue;
         for(const sz of f.sizes){
@@ -2187,7 +2195,7 @@
           const pass = c[k].passProb;
           const ev = pass*c[k].avgPaid*splitF*sz - fee;
           out.push({firm:fk, plan:k, size:sz, fee, ev, roi:ev/fee, pass,
-                    split:bestSplit, need:bankrollNeed(fee,pass)});
+                    split:CMP_SPLIT, need:bankrollNeed(fee,pass)});
         }
       }
     }
@@ -2394,8 +2402,7 @@
       const keep = keeps && keeps[fk] ? keeps[fk].keep : 1;
       const head = '<div class="firmhead"><b>'+esc(f.name)+'</b>'+
         '<span>'+f.planKeys.map(k=>cap(k)+' '+fmtPct(cmpAll[fk][k].passProb,0)).join(' · ')+'</span>'+
-        '<span class="keeps">keeps '+(keep*100).toFixed(0)+'% of a win after its costs · '+
-        Math.max(...f.splits.map(x=>x[0]))+'% split</span></div>';
+        '<span class="keeps">keeps '+(keep*100).toFixed(0)+'% of a win after its costs · 80% split</span></div>';
       const rows = f.sizes.map(sz=>{
         const cells = f.planKeys.map(k=>{
           const o = list.find(x=>x.plan===k && x.size===sz);
@@ -2511,6 +2518,15 @@
         ' behind it.</b> This is the most you can fund without one bad run ending it.</li>');
     }
 
+    const up = FIRMS[pick.firm].splits.find(x=>x[0]>80);
+    const upFee = up && FIRMS[pick.firm].fees[pick.plan] && FIRMS[pick.firm].fees[pick.plan][pick.size];
+    if(up && upFee && upFee[1]){
+      const upEv = pick.pass*cmpAll[pick.firm][pick.plan].avgPaid*(up[0]/100)*pick.size - upFee[1];
+      bits.push('<li><b>'+FIRMS[pick.firm].name+' also sells a '+up[0]+'/'+(100-up[0])+' upgrade</b> on this account for '+
+        fmt$(upFee[1])+' instead of '+fmt$(pick.fee)+' — worth '+fmt$(upEv)+' per eval against '+fmt$(pick.ev)+
+        (upEv>pick.ev ? ', so the upgrade pays for itself at your numbers.' : ', so it does not pay for itself at your numbers.')+
+        ' Everything above compares firms at the 80/20 they both offer.</li>');
+    }
     const bigger = positive.filter(o=>o.need>bankroll && o.ev>pick.ev).sort((a,b)=>a.need-b.need)[0];
     if(bigger){
       bits.push('<li><b>Next step up: '+label(bigger)+'</b> at '+fmt$(bigger.ev)+' expected. '+
