@@ -205,6 +205,16 @@
   .recstats{display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:12px; margin-top:13px}
   .recstats .k{font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted)}
   .recstats .v{font-family:"IBM Plex Mono",monospace; font-size:16px; font-weight:600; color:var(--ink); margin-top:2px}
+  .recnote{font-size:12px; color:var(--sub); margin:10px 0 0; line-height:1.55}
+  .recnote b{color:var(--ink); font-weight:600}
+  .cmpsplit{border-top:1px solid var(--border); margin-top:18px; padding-top:16px}
+  .cmpsplit h4{font-family:Archivo,system-ui,sans-serif; font-size:13px; font-weight:700; margin:0 0 4px}
+  #cmpTable td{line-height:1.25; padding:9px 10px}
+  #cmpTable .roi{display:block; font-size:11px; color:var(--muted)}
+  #cmpTable td.best{box-shadow:inset 0 0 0 1px var(--muted); border-radius:8px}
+  #cmpTable td.pick{box-shadow:inset 0 0 0 2px var(--accent); border-radius:8px; background:rgba(240,162,50,.10)}
+  #cmpTable td.na{color:var(--muted)}
+  #cmpTable td.oor{opacity:.4}                 /* your bankroll does not safely reach it */
 
   /* checker */
   .ctxbar{background:var(--inset); border:1px solid var(--border); border-left:3px solid var(--accent);
@@ -572,6 +582,16 @@
           <div class="recstats" id="recStats"></div>
         </div>
         <ul class="steps" id="recWhy"></ul>
+
+        <div class="cmpsplit">
+          <h4>Every option, compared</h4>
+          <p class="sub" id="cmpSub">Average profit per eval bought, with return on the fee underneath. Your pick is ringed in amber, the best plan you can actually fund at each size is outlined, and anything out of reach is dimmed.</p>
+          <div style="overflow-x:auto"><table id="cmpTable">
+            <thead><tr><th>Account</th><th id="cmpH0">Classic</th><th id="cmpH1">Pro</th><th id="cmpH2">Turbo</th></tr></thead>
+            <tbody></tbody>
+          </table></div>
+          <div class="hint" id="cmpFoot">—</div>
+        </div>
       </div>
 
       <div class="card">
@@ -2172,6 +2192,52 @@
   // determine it. The pick is the highest expected profit among the rungs the money set aside
   // actually covers — never the biggest EV on the board, because an account you cannot fund
   // twice is one bad run from over.
+  // The grid under the pick. It answers a different question — "what else was on the table" —
+  // so it stays, greyed where the bankroll cannot reach and ringed where the pick landed.
+  function renderCompare(cmp, p, pick){
+    const splitIdx = +$('split').value===90?1:0, splitF=+$('split').value/100;
+    PLAN_KEYS.forEach((k,i)=>{
+      $('cmpH'+i).textContent = cap(k)+' · pass '+fmtPct(cmp[k].passProb,0)
+        + (cmp[k].risk!=null ? ' · risk '+(cmp[k].risk*100).toFixed(2)+'%' : '');
+    });
+    const bankroll = +$('bankroll').value||0;
+    const rows = SIZES.map(sz=>{
+      const c={};
+      for(const k of PLAN_KEYS){
+        const feeArr=FEES[k][sz];
+        if(!feeArr){ c[k]=null; continue; }
+        const fee=feeArr[splitIdx];
+        const pass=cmp[k].passProb;
+        const ev=pass*cmp[k].avgPaid*splitF*sz - fee;
+        c[k]={fee, ev, roi: ev/fee, need: bankrollNeed(fee,pass)};
+      }
+      return {sz,c};
+    });
+    $('cmpTable').querySelector('tbody').innerHTML = rows.map(r=>{
+      // best PLAN within each size — comparing return-on-fee across sizes is meaningless,
+      // fees scale with the account so the ratio barely moves and ties arbitrarily
+      let bestK=null;
+      for(const k of PLAN_KEYS){
+        const dd=r.c[k];
+        if(dd && dd.ev>0 && (!bestK || dd.roi>r.c[bestK].roi)) bestK=k;
+      }
+      const cells = PLAN_KEYS.map(k=>{
+        const dd=r.c[k];
+        if(!dd) return '<td class="na">—</td>';
+        const isPick = pick && pick.plan===k && pick.size===r.sz;
+        const oor = bankroll>0 && dd.ev>0 && dd.need>bankroll;
+        const cls = (dd.ev>=0?'pos':'neg') + (isPick?' pick':(k===bestK && !oor?' best':'')) + (oor?' oor':'');
+        return '<td class="'+cls+'">'+fmt$(dd.ev)+
+               '<span class="roi">'+(oor ? 'needs '+fmt$(dd.need)+' behind it'
+                                         : (dd.roi>=0?'+':'')+(dd.roi*100).toFixed(0)+'% on '+fmt$(dd.fee)+' fee')+'</span></td>';
+      }).join('');
+      return '<tr><td>'+fmt$(r.sz)+'</td>'+cells+'</tr>';
+    }).join('');
+    $('cmpFoot').textContent = bankroll>0
+      ? 'Dimmed cells want more than the '+fmt$(bankroll)+' you have set aside — the line under each says how much. Always uses Breakout\'s official plan rules.'
+      : 'Always uses Breakout\'s official plan rules.';
+  }
+
   function renderRecommendation(cmp, p){
     const splitIdx = +$('split').value===90?1:0;
     const bankroll = +$('bankroll').value||0;
@@ -2181,6 +2247,7 @@
     const label = o => cap(o.plan)+' '+fmt$(o.size);
     const stat = (k,v) => '<div><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';
 
+    renderCompare(cmp, p, null);   // the grid is drawn whatever the verdict
     // nothing on the board is worth buying at these stats
     if(!positive.length){
       box.className='recpick cold';
@@ -2207,7 +2274,7 @@
       $('recName').textContent=label(cheapest);
       $('recStats').innerHTML =
         stat('Fee', fmt$(cheapest.fee)) + stat('Pass rate', fmtPct(cheapest.pass,0)) +
-        stat('EV per eval', fmt$(cheapest.ev)) + stat('Bankroll needed', fmt$(cheapest.need));
+        stat('Avg per eval bought', fmt$(cheapest.ev)) + stat('Bankroll needed', fmt$(cheapest.need));
       $('recSub').textContent='Not yet — this is the one to save for.';
       why.innerHTML=
         '<li><b>'+fmt$(bankroll)+' set aside is short of the '+fmt$(cheapest.need)+' this needs.</b> '+
@@ -2219,10 +2286,18 @@
     }
 
     box.className='recpick';
+    renderCompare(cmp, p, pick);
     $('recName').textContent=label(pick);
     $('recStats').innerHTML =
       stat('Fee', fmt$(pick.fee)) + stat('Pass rate', fmtPct(pick.pass,0)) +
-      stat('EV per eval', fmt$(pick.ev)) + stat('Bankroll needed', fmt$(pick.need));
+      stat('Avg per eval bought', fmt$(pick.ev)) + stat('Bankroll needed', fmt$(pick.need)) +
+      // spelled out, because an average that already contains the failures is easy to misread
+      '<div class="recnote" style="grid-column:1/-1">'+
+        '<b>Avg per eval bought</b> is what one purchase is worth on average across many attempts — '+
+        'the failures are already inside it. '+fmtPct(pick.pass,0)+' of them pass and pay you about '+
+        fmt$(cmp[pick.plan].avgPaid*(+$('split').value/100)*pick.size)+' on your '+(+$('split').value)+'% split; '+
+        fmtPct(1-pick.pass,0)+' fail and pay nothing. Every attempt costs the '+fmt$(pick.fee)+' fee. '+
+        'Net <b>'+fmt$(pick.ev)+'</b> per eval bought — an average, not a forecast for any one attempt.</div>';
     $('recSub').textContent =
       'From your '+fmtPct(p.winRate)+' win rate at '+p.R.toFixed(1)+'R, '+(+$('split').value)+'/'+(100-+$('split').value)+
       ' split, and the '+fmt$(bankroll)+' you have set aside for fees.';
