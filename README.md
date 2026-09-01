@@ -1,4 +1,4 @@
-# Prop Firm Tracker
+# Prop Firm Edge
 
 Position sizing, rule checking and a trade journal for prop-firm evaluations,
 with live BTC/ETH prices from OKX perpetual futures.
