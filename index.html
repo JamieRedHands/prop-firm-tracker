@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="15e8e7a · 1 Sept 2026, 16:08">
+<meta name="build" content="6c266e6 · 1 Sept 2026, 16:17">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -673,7 +673,7 @@
             <input type="number" id="cHold" min="0" max="720" step="1" value="24">
           </div>
         </div>
-        <div class="field">
+        <div class="field" id="cPlatField">
           <label><span class="lbl">Platform</span></label>
           <select id="cPlat"></select>
         </div>
@@ -2794,8 +2794,9 @@
     $('cFinHint').innerHTML = stopPct>0
       ? `Holding ${bleedPerDay<0?'<strong style="color:var(--good)">pays you '+(Math.abs(bleedPerDay)*100).toFixed(1)+'% of your risk per day</strong>':'costs <strong>'+(bleedPerDay*100).toFixed(1)+'% of your risk per day</strong>'} `+
         `(${(FIN_DAILY*100).toFixed(3)}% of notional ÷ your ${(stopPct*100).toFixed(2)}% stop). `+
-        `Budgeted for ${holdH2}h = <strong>${fmt$2(finFee)}</strong>, ${(finShare*100).toFixed(1)}% of risk — `+
-        `so close or re-size by <strong>${melWhen(closeBy.getTime())}</strong> or you drift past budget.`
+        (finFee<0
+          ? `Over ${holdH2}h that is <strong>${fmt$2(Math.abs(finFee))} in your favour</strong>, so holding longer helps rather than costs. It flips if the premium turns, so do not build the plan on it.`
+          : `Budgeted for ${holdH2}h = <strong>${fmt$2(finFee)}</strong>, ${(finShare*100).toFixed(1)}% of risk — so close or re-size by <strong>${melWhen(closeBy.getTime())}</strong> or you drift past budget.`)
       : 'Set an entry and stop to price the holding cost.';
 
     const grossRR = stopDist>0 && tgt>0 ? Math.abs(tgt-entry)/stopDist : 0;
@@ -3229,6 +3230,7 @@
     const platWas=$('cPlat').value;
     $('cPlat').innerHTML = f.platforms.map(([v,l])=>'<option value="'+v+'">'+esc(l)+'</option>').join('');
     keep($('cPlat'), platWas);
+    $('cPlatField').hidden = f.platforms.length < 2;
 
     const symWas=$('cSym').value;
     $('cSym').innerHTML = Object.keys(SYMBOLS)
