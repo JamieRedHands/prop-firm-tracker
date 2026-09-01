@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="ae3507e · 1 Sept 2026, 17:40">
+<meta name="build" content="5175e56 · 1 Sept 2026, 17:53">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -353,6 +353,8 @@
           margin:10px 0 0; font-size:12.5px; font-weight:600}
   .lalert.tgt{background:rgba(34,180,85,.16); border:1px solid var(--good); color:#7ce3a1}
   .lalert.stp{background:rgba(230,103,103,.16); border:1px solid var(--bad); color:#f7a3a3}
+  .lalert{line-height:1.5}
+  .lalert b{color:var(--ink)}
   .lalert .btn{padding:4px 11px; font-size:12px; margin-left:auto}
 
 
@@ -1555,6 +1557,19 @@
     if(lp!=null) return lp;
     return +t.mark>0 ? +t.mark : null;
   }
+  // A touched level means the order filled, so the position is finished at that price and the
+  // clock stops there too. Marking it onward to the live market kept the P/L and the R multiple
+  // moving after the trade was effectively over. Dismissing the alert says "it did not actually
+  // fill" and hands the row back to the live feed.
+  function liveExit(t){
+    const lvl = t.alerted==='target' ? +t.target : t.alerted==='stop' ? +t.stop : 0;
+    if(t.alerted && lvl>0){
+      return {px:lvl, kind: t.alerted==='target' ? 'maker' : 'taker',
+              ms: t.alertAt ? Date.parse(t.alertAt) : Date.now(), locked:true};
+    }
+    const px = markFor(t);
+    return px==null ? null : {px, kind:'taker', ms:Date.now(), locked:false};
+  }
   const px6 = v => v>=1000 ? v.toLocaleString(undefined,{maximumFractionDigits:1})
                            : v.toLocaleString(undefined,{maximumFractionDigits:4});
 
@@ -1602,6 +1617,7 @@
   // a what-if, so it never sets the peak — otherwise one fat-fingered number would permanently
   // claim the trade reached a level it never did.
   function noteBest(t){
+    if(t.alerted) return false;          // finished trades have no more highs to make
     const lp=livePx(t);
     if(lp==null || !(lp>0)) return false;
     const dir = t.dir==='short' ? -1 : 1;
@@ -1671,12 +1687,14 @@
   }
 
   function liveRow(t){
-    const px = markFor(t);
+    const x = liveExit(t);
+    const px = x ? x.px : null;
     const can = priceable(t);
     const id=t.id;
     const money = can && px!=null;
-    const c = money ? settleCalc(t, px, Date.now()) : null;
+    const c = money ? settleCalc(t, px, x.ms, x.kind) : null;
     const L = money ? liveState(t, px) : null;
+    const locked = !!(x && x.locked);
     const cls = L ? (L.hitStop?'hitStop':(L.hitTgt?'hitTgt':'')) : '';
     return '<div class="live '+cls+'" data-row="'+id+'" data-mode="'+liveMode(t)+'">'+
       '<div class="lhead"><b>'+esc(t.sym||'—')+' '+dirTag(t)+'</b>'+
@@ -1686,11 +1704,11 @@
         '<span class="lflag" data-out="flag-'+id+'">'+liveFlag(L)+'</span></div>'+
       '<div class="lgrid">'+
         priceCell(t)+
-        '<div><span class="lk">P/L if closed now</span><span class="lv '+plCls(c)+'" data-out="pl-'+id+'">'+(c?fmt$2(c.net):'—')+'</span></div>'+
-        '<div><span class="lk">R so far</span><span class="lv '+plCls(c)+'" data-out="r-'+id+'">'+(c?(c.R>=0?'+':'')+c.R.toFixed(2)+'R':'—')+'</span>'+
+        '<div><span class="lk" data-out="pllabel-'+id+'">'+(locked?(t.alerted==='target'?'P/L at your target':'P/L at your stop'):'P/L if closed now')+'</span><span class="lv '+plCls(c)+'" data-out="pl-'+id+'">'+(c?fmt$2(c.net):'—')+'</span></div>'+
+        '<div><span class="lk" data-out="rlabel-'+id+'">'+(locked?'R locked in':'R so far')+'</span><span class="lv '+plCls(c)+'" data-out="r-'+id+'">'+(c?(c.R>=0?'+':'')+c.R.toFixed(2)+'R':'—')+'</span>'+
           '<span class="lpeak" data-out="peak-'+id+'">'+peakLabel(t,c)+'</span></div>'+
         '<div><span class="lk">Held</span><span class="lv" data-out="held-'+id+'">'+(c?c.hours.toFixed(1)+'h':'—')+'</span></div>'+
-        '<div><span class="lk">Costs so far</span><span class="lv" data-out="fees-'+id+'">'+(c?fmt$2(c.fees):'—')+'</span></div>'+
+        '<div><span class="lk" data-out="feelabel-'+id+'">'+(locked?'Costs':'Costs so far')+'</span><span class="lv" data-out="fees-'+id+'">'+(c?fmt$2(c.fees):'—')+'</span></div>'+
       '</div>'+
       track(t, L, id)+
       alertBanner(t)+
@@ -1714,7 +1732,7 @@
   // A row is either following OKX or being typed into. When it follows, the price is a readout —
   // there is nothing to fill in — and it is rewritten on every tick. Switching between the two
   // changes the markup, so the mode is stamped on the row and a change forces a full re-render.
-  const liveMode = t => (livePx(t)!=null && !t.pinned) ? 'live' : 'manual';
+  const liveMode = t => t.alerted ? 'locked' : ((livePx(t)!=null && !t.pinned) ? 'live' : 'manual');
   const firmOf  = t => (t.firm && FIRMS[t.firm]) ? t.firm : 'breakout';
   const venueOf = t => feedOf(firmOf(t));
   const venueTag = t => venueOf(t).src==='hl' ? 'HL' : 'OKX';
@@ -1728,6 +1746,12 @@
   }
   function priceCell(t){
     const id=t.id;
+    if(liveMode(t)==='locked'){
+      const lvl = t.alerted==='target' ? +t.target : +t.stop;
+      return '<div><span class="lk">Filled at your '+(t.alerted==='target'?'target':'stop')+
+             '<span class="lchip '+(t.alerted==='target'?'okx':'stale')+'">LOCKED</span></span>'+
+             '<span class="lv" data-live>'+px6(lvl)+'</span></div>';
+    }
     const head='<div><span class="lk">Price now<span data-out="chip-'+id+'">'+chipHtml(t)+'</span></span>';
     if(liveMode(t)==='live'){
       return head+'<span class="lv" data-live data-out="px-'+id+'">'+px6(livePx(t))+'</span>'+
@@ -1742,9 +1766,18 @@
     if(!t.alerted) return '';
     const tgt = t.alerted==='target';
     const when = t.alertAt ? melTime(Date.parse(t.alertAt)) : '';
+    let worth='';
+    if(priceable(t)){
+      const lvl = tgt ? +t.target : +t.stop;
+      if(lvl>0){
+        const c = settleCalc(t, lvl, Date.now(), tgt ? 'maker' : 'taker');
+        worth = ' — filling there is worth <b>'+fmt$2(c.net)+'</b> ('+(c.R>=0?'+':'')+c.R.toFixed(2)+
+                'R) after <b>'+fmt$2(c.fees)+'</b> of costs';
+      }
+    }
     return '<div class="lalert '+(tgt?'tgt':'stp')+'">'+
       (tgt?'Target':'Stop')+' reached at '+px6(+t.alertPx||0)+(when?' · '+when:'')+
-      ' — settle it with your actual fill'+
+      (worth || ' — settle it with your actual fill')+
       '<button class="btn '+(tgt?'win':'loss')+'" data-settle="'+t.id+'" data-how="'+(tgt?'win':'loss')+'">Settle now</button>'+
       '<button class="del" data-clearalert="'+t.id+'" title="Dismiss" aria-label="Dismiss">×</button></div>';
   }
@@ -1789,13 +1822,14 @@
     const id=t.id, row=$('dLive').querySelector('[data-row="'+id+'"]');
     if(!row) return;
     if(row.dataset.mode !== liveMode(t)){ renderLive(); return; }   // readout <-> box needs new markup
-    const px = markFor(t);
+    const x = liveExit(t);
+    const px = x ? x.px : null;
     const money = priceable(t) && px!=null;
     const pxOut = row.querySelector('[data-out="px-'+id+'"]');
     if(pxOut && px!=null) pxOut.textContent = px6(px);
     const chip = row.querySelector('[data-out="chip-'+id+'"]');
     if(chip){ const h=chipHtml(t); if(chip.innerHTML!==h) chip.innerHTML=h; }
-    const c = money ? settleCalc(t, px, Date.now()) : null;
+    const c = money ? settleCalc(t, px, x.ms, x.kind) : null;
     const L = money ? liveState(t, px) : null;
     const set=(k,v,cls)=>{ const el=row.querySelector('[data-out="'+k+'-'+id+'"]'); if(!el) return;
       el.textContent=v; if(cls!=null){ el.classList.remove('pos','neg'); if(cls) el.classList.add(cls); } };
