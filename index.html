@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="8a16b24 · 1 Sept 2026, 13:14">
+<meta name="build" content="b7cabc7 · 1 Sept 2026, 15:53">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -950,7 +950,10 @@
       fees:{
         classic:{5000:[60,60], 10000:[110,110], 25000:[275,275], 50000:[495,495], 100000:[999,999], 200000:[1998,1998]},
         pro:    {5000:[45,45], 10000:[85,85],   25000:[185,185], 50000:[355,355], 100000:[699,699], 200000:[1399,1399]},
-        turbo:  {5000:[25,25], 10000:[50,50],   25000:[125,125], 50000:[245,245], 100000:[450,450], 200000:[899,899]}
+        // No $200,000 Turbo. propr.xyz and the rulebook both list one at $899, but the actual
+        // checkout at app.propr.xyz offers only Classic and Pro at that size — and what you can
+        // buy beats what the marketing page says you can.
+        turbo:  {5000:[25,25], 10000:[50,50],   25000:[125,125], 50000:[245,245], 100000:[450,450]}
       },
       // Hyperliquid fees passed through at cost, no markup. Base tier taker 0.045%, maker 0.015%.
       commission:0.00045, makerCommission:0.00015,
@@ -3126,7 +3129,7 @@
     applyFirm($('firm').value);
     renderFirmUI();
     feed.dead=false; feed.fails=0; pollFeed();   // the new firm prices off a different venue
-    updateRuleLock(); guardClassic200k(); updateFee(); applyAutoRisk();
+    updateRuleLock(); guardSizes(); updateFee(); applyAutoRisk();
     stampClock(); saveState();
     syncCheckerToday(); renderChecker(); renderLive(); renderJournal();
     debounced();
@@ -3205,6 +3208,7 @@
       .map(k=>'<option value="'+k+'">'+k+' · '+SYMBOLS[k][1]+'× · max '+fmt$(SYMBOLS[k][0])+'</option>').join('');
     keep($('cSym'), symWas);
 
+    guardSizes();
     $('planHint').innerHTML = 'Target and drawdowns follow the plan. Pick <strong>Paper trading</strong> to rehearse '+
       'with no fee — same commissions, financing and drawdown rules, no money at risk — and edit the limits to mirror '+
       'whichever plan you are aiming at. '+esc(f.capNote);
@@ -3248,17 +3252,23 @@
     const f=t && t[$('acct').value];
     if(f) $('cost').value = f[+$('split').value===90?1:0];
   }
-  function guardClassic200k(){
-    const classic = $('plan').value==='classic';
-    $('acct').querySelector('option[value="200000"]').disabled = classic;
-    if(classic && $('acct').value==='200000') $('acct').value='100000';
+  function guardSizes(){
+    const plan=$('plan').value;
+    const table = FEES[plan];                 // paper has no table and mirrors any size
+    const opts=[...$('acct').options];
+    opts.forEach(o=>{ o.disabled = !!table && !table[o.value]; });
+    const cur=$('acct').selectedOptions[0];
+    if(cur && cur.disabled){
+      const fallback=opts.filter(o=>!o.disabled).pop();
+      if(fallback) $('acct').value=fallback.value;
+    }
   }
   function updatePayoutMode(){ $('trigField').style.display = $('payoutMode').value==='win' ? 'none' : ''; }
 
   $('plan').addEventListener('change',()=>{
     const v=$('plan').value;
     if(PLANS[v]){ $('target').value=PLANS[v].target; $('maxdd').value=PLANS[v].maxdd; $('dailydd').value=PLANS[v].dailydd; }
-    updateRuleLock(); guardClassic200k(); updateFee(); debouncedWithRisk();
+    updateRuleLock(); guardSizes(); updateFee(); debouncedWithRisk();
   });
   ['maxdd','dailydd'].forEach(id=>$(id).addEventListener('input',()=>applyAutoRisk()));
   $('autoRisk').addEventListener('change',()=>{
@@ -3374,7 +3384,7 @@
     ['winRate','rr','risk'].forEach(id=>{ $(id+'N').value=$(id).value; showPair(id); });
     $('useTracked').checked = !!s.useTracked;
     $('autoRisk').checked = s.autoRisk!==false;      // derived risk is the default
-    updateRuleLock(); guardClassic200k(); updatePayoutMode();
+    updateRuleLock(); guardSizes(); updatePayoutMode();
     applyAutoRisk();
     lockTracked($('useTracked').checked);
     if($('useTracked').checked) applyTracked();
