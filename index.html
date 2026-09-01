@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="c000924 · 1 Sept 2026, 18:59">
+<meta name="build" content="f841b82 · 1 Sept 2026, 20:10">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -1698,7 +1698,8 @@
     const cls = L ? (L.hitStop?'hitStop':(L.hitTgt?'hitTgt':'')) : '';
     return '<div class="live '+cls+'" data-row="'+id+'" data-mode="'+liveMode(t)+'">'+
       '<div class="lhead"><b>'+esc(t.sym||'—')+' '+dirTag(t)+'</b>'+
-        '<span class="lacct">'+(t.entry? 'entry '+t.entry+' · ':'')+fmt$(t.risk)+' at risk · opened '+
+        '<span class="lacct">'+(t.entry? 'entry '+t.entry+' · ':'')+fmt$(t.risk)+' at risk'+
+          (priceRiskOf(t)!=null ? ' ('+fmt$(priceRiskOf(t))+' stop + '+fmt$(t.risk-priceRiskOf(t))+' costs)' : '')+' · opened '+
           esc(t.opened ? melDateTime(Date.parse(t.opened)) : (t.date||''))+
           ' · '+esc(FIRMS[firmOf(t)].name)+'</span>'+
         '<span class="lflag" data-out="flag-'+id+'">'+liveFlag(L)+'</span></div>'+
@@ -1721,6 +1722,9 @@
       '</div></div>';
   }
   const plCls = c => !c ? '' : (c.net>=0?'pos':'neg');
+  // the part of 1R that is pure price move — the rest is what the round trip costs
+  const priceRiskOf = t => (+t.units>0 && +t.entry>0 && +t.stop>0)
+    ? +t.units*Math.abs(+t.stop-+t.entry) : null;
   // how good it got, shown only once the price has actually pulled back from it
   function peakLabel(t, c){
     if(!c || t.best==null || !priceable(t)) return '';
@@ -2918,9 +2922,10 @@
     const feeR = gapFee + gapFeeWin;
 
     $('cRiskOut').textContent = fmt$2(risk);
-    $('cRiskSub').textContent = sizeCapped
-      ? `= 1R · capped by ${capBy}, down from ${fmt$2(sr.risk)}`
-      : `= 1R at your stop · +${fmt$2(slipCost)} if it slips ${bps} bps`;
+    const priceRisk = units*stopDist;
+    $('cRiskSub').textContent =
+      `= 1R · ${fmt$2(priceRisk)} stop + ${fmt$2(risk-priceRisk)} costs`+
+      (sizeCapped ? ` · capped by ${capBy}, was ${fmt$2(sr.risk)}` : '');
     $('cNetR').textContent = tgt>0 ? grossRR.toFixed(2)+'R' : '—';
     $('cNetR').className = 'v ' + (!(tgt>0) ? '' : netR>=beR*1.25 ? 'pos' : netR>=beR ? 'warn' : 'neg');
     $('cNetRSub').textContent = tgt>0 ? `${netR.toFixed(2)}R net · ${fmt$2(netWin)}` : 'set a target';
