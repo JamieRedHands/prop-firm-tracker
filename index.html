@@ -209,12 +209,17 @@
   .recnote b{color:var(--ink); font-weight:600}
   .cmpsplit{border-top:1px solid var(--border); margin-top:18px; padding-top:16px}
   .cmpsplit h4{font-family:Archivo,system-ui,sans-serif; font-size:13px; font-weight:700; margin:0 0 4px}
-  #cmpTable td{line-height:1.25; padding:9px 10px}
-  #cmpTable .roi{display:block; font-size:11px; color:var(--muted)}
-  #cmpTable td.best{box-shadow:inset 0 0 0 1px var(--muted); border-radius:8px}
-  #cmpTable td.pick{box-shadow:inset 0 0 0 2px var(--accent); border-radius:8px; background:rgba(240,162,50,.10)}
-  #cmpTable td.na{color:var(--muted)}
-  #cmpTable td.oor{opacity:.4}                 /* your bankroll does not safely reach it */
+  .firmblock{margin-top:16px}
+  .firmblock:first-of-type{margin-top:8px}
+  .firmhead{display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; margin-bottom:5px}
+  .firmhead b{font-family:Archivo,system-ui,sans-serif; font-size:13px; font-weight:700; color:var(--ink)}
+  .firmhead span{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--muted)}
+  .firmhead .keeps{color:var(--sub)}
+  #cmpTables td{line-height:1.25; padding:9px 10px}
+  #cmpTables .roi{display:block; font-size:11px; color:var(--muted)}
+  #cmpTables td.pick{box-shadow:inset 0 0 0 2px var(--accent); border-radius:8px; background:rgba(240,162,50,.10)}
+  #cmpTables td.na{color:var(--muted)}
+  #cmpTables td.oor{opacity:.4}                /* your bankroll does not safely reach it */
 
   /* checker */
   .ctxbar{background:var(--inset); border:1px solid var(--border); border-left:3px solid var(--accent);
@@ -578,11 +583,8 @@
 
         <div class="cmpsplit">
           <h4>Every option, compared</h4>
-          <p class="sub" id="cmpSub">Average profit per eval bought, with return on the fee underneath. Your pick is ringed in amber, the best plan you can actually fund at each size is outlined, and anything out of reach is dimmed.</p>
-          <div style="overflow-x:auto"><table id="cmpTable">
-            <thead><tr><th>Account</th><th id="cmpH0">Classic</th><th id="cmpH1">Pro</th><th id="cmpH2">Turbo</th></tr></thead>
-            <tbody></tbody>
-          </table></div>
+          <p class="sub" id="cmpSub">Every plan and size at every firm. Average profit per eval bought, with return on the fee underneath. Your pick is ringed in amber; anything your bankroll cannot safely reach is dimmed.</p>
+          <div id="cmpTables"></div>
           <div class="hint" id="cmpFoot">—</div>
         </div>
       </div>
@@ -1941,11 +1943,12 @@
   // Each plan sized on its own daily budget. All three cap daily loss at 3%, so this comes out
   // the same for each — the plans then differ in the simulation by their drawdown floor and
   // profit target, which is exactly where the difference belongs.
-  function planRisk(k){
-    if(!$('autoRisk').checked || !PLANS[k]) return +$('risk').value/100;
+  function planRisk(k, fk){
+    const plans = (fk && FIRMS[fk]) ? FIRMS[fk].plans : PLANS;
+    if(!$('autoRisk').checked || !plans[k]) return +$('risk').value/100;
     const nPerDay = Math.max(1, Math.round(+$('cMaxTrades').value||2));
     const usePct  = Math.min(1, Math.max(0.1, (+$('cUsePct').value||85)/100));
-    return Math.max(0.001, PLANS[k].dailydd/100*usePct/nPerDay);
+    return Math.max(0.001, plans[k].dailydd/100*usePct/nPerDay);
   }
 
   function applyAutoRisk(){
@@ -1997,7 +2000,7 @@
     } else if(main.ev<=0){
       cls='plan-wait'; verdict='Not yet — edge is real but too thin';
       headline=`You make ${edge.toFixed(2)}R per trade, but at these settings the fee and drawdown rules still eat it: ${fmt$(main.ev)} expected per eval.`;
-      const best = cheapestViable(cmp, +$('split').value===90?1:0);
+      const best = LAST_CHEAPEST;
       if(best && best.ev>0){
         steps.push(`<strong>A cheaper account already works.</strong> ${cap(best.plan)} at ${fmt$(best.size)} is <code>${fmt$(best.ev)}</code> per eval (${(best.roi*100).toFixed(0)}% on a ${fmt$(best.fee)} fee). Start there, not where you are now.`);
       } else {
@@ -2034,22 +2037,62 @@
   // Bankroll needed to responsibly play a rung. Two guards, take the stricter:
   //  1. enough fees to cover the attempts you need with 95% confidence, not just the average
   //  2. no single fee larger than 20% of the bankroll — one bad run must never be fatal
+  // What a firm's trading costs do to the reward you drew on the chart. The trade shape in the
+  // Pre-Trade Check decides it — stop distance, hold time, symbol and direction all move the
+  // answer, so there is no firm-agnostic number to quote. A losing trade costs exactly 1R at
+  // every firm by construction (that is what the sizing does), so the whole difference lands on
+  // the winning side, and the ratio below is what each firm lets you keep of a win.
+  function firmKeepRatio(fk){
+    const save=FIRM_KEY;
+    applyFirm(fk);
+    let keep=1, detail=null;
+    const entry=+$('cEntry').value||0, stop=+$('cStop').value||0, tgt=+$('cTarget').value||0;
+    const hold=Math.max(0,+$('cHold').value||0);
+    const stopDist=Math.abs(entry-stop), tgtDist=Math.abs(tgt-entry);
+    if(entry>0 && stopDist>0 && tgtDist>0){
+      const dir = tgt>entry ? 'long' : 'short';
+      const plat = (FIRM.platforms[0]||['bo'])[0];
+      const fin = finFor(hold, plat, dir);
+      const costStop = COMMISSION*entry + COMMISSION*stop + fin*entry;
+      const costTgt  = COMMISSION*entry + COMMISSION*tgt  + fin*entry;
+      const lossPerUnit = stopDist + costStop;
+      if(lossPerUnit>0){
+        const grossRR = tgtDist/stopDist;
+        const netR = (tgtDist - costTgt)/lossPerUnit;
+        if(grossRR>0) keep = netR/grossRR;
+        detail={grossRR, netR, dir, stopPct:stopDist/entry, hold};
+      }
+    }
+    applyFirm(save);
+    return {keep: (isFinite(keep)&&keep>0) ? keep : 1, detail};
+  }
+
   function bankrollNeed(fee, pass){
     if(!(pass>0)) return Infinity;
     const attempts95 = pass>=1 ? 1 : Math.ceil(Math.log(0.05)/Math.log(1-pass));
     return Math.max(attempts95*fee, fee*5);
   }
 
-  function rankOptions(cmp, splitIdx){
-    const splitF = +$('split').value/100;
+  // Every plan at every size at every firm. Each firm carries its own fee table and its own
+  // best available split, so the comparison is between what you would actually pay and be paid.
+  function rankOptions(cmpAll){
     const out=[];
-    for(const k of PLAN_KEYS){
-      for(const sz of SIZES){
-        const feeArr = FEES[k][sz]; if(!feeArr) continue;
-        const fee = feeArr[splitIdx];
-        const pass = cmp[k].passProb;
-        const ev = pass*cmp[k].avgPaid*splitF*sz - fee;
-        out.push({plan:k, size:sz, fee, ev, roi:ev/fee, pass, need:bankrollNeed(fee,pass)});
+    for(const fk of FIRM_KEYS){
+      const f=FIRMS[fk], c=cmpAll[fk];
+      if(!c) continue;
+      const bestSplit = Math.max(...f.splits.map(x=>x[0]));
+      const splitIdx = bestSplit===90 ? 1 : 0;
+      const splitF = bestSplit/100;
+      for(const k of f.planKeys){
+        if(!c[k]) continue;
+        for(const sz of f.sizes){
+          const feeArr = f.fees[k] && f.fees[k][sz]; if(!feeArr) continue;
+          const fee = feeArr[splitIdx];
+          const pass = c[k].passProb;
+          const ev = pass*c[k].avgPaid*splitF*sz - fee;
+          out.push({firm:fk, plan:k, size:sz, fee, ev, roi:ev/fee, pass,
+                    split:bestSplit, need:bankrollNeed(fee,pass)});
+        }
       }
     }
     return out;
@@ -2058,17 +2101,16 @@
   // The size to actually trade: most expected profit among the rungs the bankroll safely covers.
   // Ranking on return-on-fee would be wrong here — fees scale almost exactly with account size,
   // so ROI barely moves and the tie would always fall to the smallest account.
-  function bestOption(cmp, splitIdx, p, bankroll){
-    const opts = rankOptions(cmp, splitIdx)
-      .filter(o=>o.ev>0 && (bankroll==null || o.need<=bankroll));
+  function bestOption(cmpAll, p, bankroll){
+    const opts = rankOptions(cmpAll).filter(o=>o.ev>0 && (bankroll==null || o.need<=bankroll));
     if(!opts.length) return null;
     opts.sort((a,b)=> b.ev-a.ev || b.size-a.size);
     return opts[0];
   }
 
   // The rung to aim for when nothing is affordable yet — the one needing the smallest bankroll.
-  function cheapestViable(cmp, splitIdx){
-    const opts = rankOptions(cmp, splitIdx).filter(o=>o.ev>0);
+  function cheapestViable(cmpAll){
+    const opts = rankOptions(cmpAll).filter(o=>o.ev>0);
     if(!opts.length) return null;
     opts.sort((a,b)=> a.need-b.need || a.fee-b.fee);
     return opts[0];
@@ -2131,9 +2173,10 @@
     const steps=[];
     if(heldPaper) steps.push(`<strong>You are rehearsing on a paper account.</strong> Nothing below is spent until you actually buy one — this is what your ${fmt$(bankroll)} would fund on ${cap(planK)} the day the journal says you are ready.`);
     // A better plan is worth mentioning, but it never rearranges this ladder.
-    const bestAnywhere = bestOption(cmp, splitIdx, p, bankroll);
-    if(bestAnywhere && bestAnywhere.plan!==planK && affordable && bestAnywhere.ev>affordable.ev*1.15){
-      steps.push(`<strong>Worth knowing:</strong> ${cap(bestAnywhere.plan)} ${fmt$(bestAnywhere.size)} would return <code>${fmt$(bestAnywhere.ev)}</code> per eval against this rung's <code>${fmt$(affordable.ev)}</code>. Switch plan above if you want that ladder instead — this one stays ${cap(planK)}.`);
+    const bestAnywhere = LAST_BEST;
+    if(bestAnywhere && affordable && bestAnywhere.ev>affordable.ev*1.15 &&
+       !(bestAnywhere.firm===FIRM_KEY && bestAnywhere.plan===planK && bestAnywhere.size===affordable.sz)){
+      steps.push(`<strong>Worth knowing:</strong> ${FIRMS[bestAnywhere.firm].name} ${cap(bestAnywhere.plan)} ${fmt$(bestAnywhere.size)} would return <code>${fmt$(bestAnywhere.ev)}</code> per eval against this rung's <code>${fmt$(affordable.ev)}</code>. Switch firm or plan above if you want that ladder instead — this one stays ${FIRM.name} ${cap(planK)}.`);
     }
 
     if(edge<=0){
@@ -2238,70 +2281,73 @@
   // determine it. The pick is the highest expected profit among the rungs the money set aside
   // actually covers — never the biggest EV on the board, because an account you cannot fund
   // twice is one bad run from over.
+  // The last cross-firm ranking, so the ladder can mention a better option elsewhere without
+  // re-running four thousand simulations to find it.
+  let LAST_BEST=null, LAST_CHEAPEST=null;
+
   // The grid under the pick. It answers a different question — "what else was on the table" —
-  // so it stays, greyed where the bankroll cannot reach and ringed where the pick landed.
-  function renderCompare(cmp, p, pick){
-    const splitIdx = +$('split').value===90?1:0, splitF=+$('split').value/100;
-    PLAN_KEYS.forEach((k,i)=>{
-      $('cmpH'+i).textContent = cap(k)+' · pass '+fmtPct(cmp[k].passProb,0)
-        + (cmp[k].risk!=null ? ' · risk '+(cmp[k].risk*100).toFixed(2)+'%' : '');
-    });
+  // so it stays, one block per firm, greyed where the bankroll cannot reach.
+  function renderCompare(cmpAll, p, pick, keeps){
     const bankroll = +$('bankroll').value||0;
-    const rows = SIZES.map(sz=>{
-      const c={};
-      for(const k of PLAN_KEYS){
-        const feeArr=FEES[k][sz];
-        if(!feeArr){ c[k]=null; continue; }
-        const fee=feeArr[splitIdx];
-        const pass=cmp[k].passProb;
-        const ev=pass*cmp[k].avgPaid*splitF*sz - fee;
-        c[k]={fee, ev, roi: ev/fee, need: bankrollNeed(fee,pass)};
-      }
-      return {sz,c};
-    });
-    $('cmpTable').querySelector('tbody').innerHTML = rows.map(r=>{
-      // best PLAN within each size — comparing return-on-fee across sizes is meaningless,
-      // fees scale with the account so the ratio barely moves and ties arbitrarily
-      let bestK=null;
-      for(const k of PLAN_KEYS){
-        const dd=r.c[k];
-        if(dd && dd.ev>0 && (!bestK || dd.roi>r.c[bestK].roi)) bestK=k;
-      }
-      const cells = PLAN_KEYS.map(k=>{
-        const dd=r.c[k];
-        if(!dd) return '<td class="na">—</td>';
-        const isPick = pick && pick.plan===k && pick.size===r.sz;
-        const oor = bankroll>0 && dd.ev>0 && dd.need>bankroll;
-        const cls = (dd.ev>=0?'pos':'neg') + (isPick?' pick':(k===bestK && !oor?' best':'')) + (oor?' oor':'');
-        return '<td class="'+cls+'">'+fmt$(dd.ev)+
-               '<span class="roi">'+(oor ? 'needs '+fmt$(dd.need)+' behind it'
-                                         : (dd.roi>=0?'+':'')+(dd.roi*100).toFixed(0)+'% on '+fmt$(dd.fee)+' fee')+'</span></td>';
+    const opts = rankOptions(cmpAll);
+    const byFirm = {};
+    for(const o of opts){ (byFirm[o.firm] = byFirm[o.firm] || []).push(o); }
+
+    $('cmpTables').innerHTML = FIRM_KEYS.filter(fk=>byFirm[fk]).map(fk=>{
+      const f=FIRMS[fk], list=byFirm[fk];
+      const keep = keeps && keeps[fk] ? keeps[fk].keep : 1;
+      const head = '<div class="firmhead"><b>'+esc(f.name)+'</b>'+
+        '<span>'+f.planKeys.map(k=>cap(k)+' '+fmtPct(cmpAll[fk][k].passProb,0)).join(' · ')+'</span>'+
+        '<span class="keeps">keeps '+(keep*100).toFixed(0)+'% of a win after its costs · '+
+        Math.max(...f.splits.map(x=>x[0]))+'% split</span></div>';
+      const rows = f.sizes.map(sz=>{
+        const cells = f.planKeys.map(k=>{
+          const o = list.find(x=>x.plan===k && x.size===sz);
+          if(!o) return '<td class="na">—</td>';
+          const isPick = pick && pick.firm===fk && pick.plan===k && pick.size===sz;
+          const oor = bankroll>0 && o.ev>0 && o.need>bankroll;
+          const cls = (o.ev>=0?'pos':'neg') + (isPick?' pick':'') + (oor?' oor':'');
+          return '<td class="'+cls+'">'+fmt$(o.ev)+
+                 '<span class="roi">'+(oor ? 'needs '+fmt$(o.need)+' behind it'
+                    : (o.roi>=0?'+':'')+(o.roi*100).toFixed(0)+'% on '+fmt$(o.fee)+' fee')+'</span></td>';
+        }).join('');
+        return '<tr><td>'+fmt$(sz)+'</td>'+cells+'</tr>';
       }).join('');
-      return '<tr><td>'+fmt$(r.sz)+'</td>'+cells+'</tr>';
+      return '<div class="firmblock">'+head+
+        '<div style="overflow-x:auto"><table><thead><tr><th>Account</th>'+
+        f.planKeys.map(k=>'<th>'+cap(k)+'</th>').join('')+'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
     }).join('');
-    $('cmpFoot').textContent = bankroll>0
-      ? 'Dimmed cells want more than the '+fmt$(bankroll)+' you have set aside — the line under each says how much. Always uses Breakout\'s official plan rules.'
-      : 'Always uses Breakout\'s official plan rules.';
+
+    const kd = keeps && keeps[FIRM_KEY] && keeps[FIRM_KEY].detail;
+    $('cmpFoot').textContent =
+      (bankroll>0 ? 'Dimmed cells want more than the '+fmt$(bankroll)+' you have set aside — the line under each says how much. ' : '')+
+      (kd ? 'Trading costs are priced from the shape in your Pre-Trade Check: a '+(kd.stopPct*100).toFixed(2)+
+            '% stop held up to '+kd.hold+'h, '+kd.dir+'. Change that trade and these move.'
+          : 'Set an entry, stop and target on the Pre-Trade Check and each firm\'s trading costs will be priced in too.');
   }
 
-  function renderRecommendation(cmp, p){
-    const splitIdx = +$('split').value===90?1:0;
+  // One answer, not a matrix. The pick is the highest expected profit among the rungs the money
+  // set aside actually covers, across every firm — never the biggest number on the board,
+  // because an account you cannot fund twice is one bad run from over.
+  function renderRecommendation(cmpAll, p, keeps){
     const bankroll = +$('bankroll').value||0;
-    const all = rankOptions(cmp, splitIdx);
+    const all = rankOptions(cmpAll);
     const positive = all.filter(o=>o.ev>0).sort((a,b)=> b.ev-a.ev || b.size-a.size);
     const box=$('recPick'), why=$('recWhy');
-    const label = o => cap(o.plan)+' '+fmt$(o.size);
+    const label = o => FIRMS[o.firm].name+' '+cap(o.plan)+' '+fmt$(o.size);
     const stat = (k,v) => '<div><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';
 
-    renderCompare(cmp, p, null);   // the grid is drawn whatever the verdict
-    // nothing on the board is worth buying at these stats
+    LAST_BEST = positive.find(o=>o.need<=bankroll) || null;
+    LAST_CHEAPEST = positive.length ? [...positive].sort((a,b)=> a.need-b.need || a.fee-b.fee)[0] : null;
+
     if(!positive.length){
+      renderCompare(cmpAll, p, null, keeps);
       box.className='recpick cold';
       $('recName').textContent='None of them';
       $('recStats').innerHTML='';
-      $('recSub').textContent='At your current numbers every plan and size loses money on the fee.';
-      const beR = p.winRate>0 ? (1-p.winRate)/p.winRate : Infinity;
+      $('recSub').textContent='At your current numbers every plan and size at every firm loses money on the fee.';
       const beW = 1/(1+p.R);
+      const beR = p.winRate>0 ? (1-p.winRate)/p.winRate : Infinity;
       why.innerHTML=
         '<li>Every account has negative expectancy once the eval fee is counted, so buying one is paying to play.</li>'+
         '<li>At '+p.R.toFixed(1)+'R you need <b>'+fmtPct(beW)+'</b> wins to break even; you have '+fmtPct(p.winRate)+'.'+
@@ -2312,9 +2358,9 @@
 
     const best = positive[0];
     const pick = positive.find(o=>o.need<=bankroll) || null;
-    const cheapest = [...positive].sort((a,b)=> a.need-b.need || a.fee-b.fee)[0];
+    const cheapest = LAST_CHEAPEST;
+    renderCompare(cmpAll, p, pick, keeps);
 
-    // the money set aside does not yet fund anything safely
     if(!pick){
       box.className='recpick wait';
       $('recName').textContent=label(cheapest);
@@ -2332,59 +2378,57 @@
     }
 
     box.className='recpick';
-    renderCompare(cmp, p, pick);
     $('recName').textContent=label(pick);
+    const keep = keeps && keeps[pick.firm] ? keeps[pick.firm].keep : 1;
     $('recStats').innerHTML =
       stat('Fee', fmt$(pick.fee)) + stat('Pass rate', fmtPct(pick.pass,0)) +
       stat('Avg per eval bought', fmt$(pick.ev)) + stat('Bankroll needed', fmt$(pick.need)) +
-      // spelled out, because an average that already contains the failures is easy to misread
       '<div class="recnote" style="grid-column:1/-1">'+
         '<b>Avg per eval bought</b> is what one purchase is worth on average across many attempts — '+
         'the failures are already inside it. '+fmtPct(pick.pass,0)+' of them pass and pay you about '+
-        fmt$(cmp[pick.plan].avgPaid*(+$('split').value/100)*pick.size)+' on your '+(+$('split').value)+'% split; '+
+        fmt$(cmpAll[pick.firm][pick.plan].avgPaid*(pick.split/100)*pick.size)+' on your '+pick.split+'% split; '+
         fmtPct(1-pick.pass,0)+' fail and pay nothing. Every attempt costs the '+fmt$(pick.fee)+' fee. '+
         'Net <b>'+fmt$(pick.ev)+'</b> per eval bought — an average, not a forecast for any one attempt.</div>';
     $('recSub').textContent =
-      'From your '+fmtPct(p.winRate)+' win rate at '+p.R.toFixed(1)+'R, '+(+$('split').value)+'/'+(100-+$('split').value)+
-      ' split, and the '+fmt$(bankroll)+' you have set aside for fees.';
+      'Across '+FIRM_KEYS.length+' firms, from your '+fmtPct(p.winRate)+' win rate at '+p.R.toFixed(1)+
+      'R and the '+fmt$(bankroll)+' you have set aside for fees.';
 
     const bits=[];
     bits.push('<li><b>'+fmt$(bankroll)+' covers it.</b> It needs '+fmt$(pick.need)+' — '+
       Math.ceil(Math.log(0.05)/Math.log(1-pick.pass))+' attempts at '+fmtPct(pick.pass,0)+
       ' pass, the run you would hit 1 time in 20, with no single '+fmt$(pick.fee)+' fee over a fifth of the pot.</li>');
 
-    // Why this plan and not the others at the same size. It may be winning on expectancy, or it
-    // may simply be the one the bankroll reaches — those are different arguments, so make it clear.
-    const rival = all.filter(o=>o.size===pick.size && o.plan!==pick.plan && o.ev>0)
-                     .sort((a,b)=>b.ev-a.ev)[0];
-    const sameRisk = cmp[pick.plan].risk!=null ? (cmp[pick.plan].risk*100).toFixed(2)+'%' : 'the same size';
-    if(rival && rival.ev>pick.ev){
-      bits.push('<li><b>'+cap(rival.plan)+' '+fmt$(rival.size)+' is worth more — '+fmt$(rival.ev)+' — but wants '+
-        fmt$(rival.need)+' behind it.</b> Its '+PLANS[rival.plan].maxdd+'% floor passes more often than '+
-        cap(pick.plan)+"'s "+PLANS[pick.plan].maxdd+'%, which is exactly why its bankroll bar is higher. '+
-        'This is the most you can fund without one bad run ending it.</li>');
-    } else if(rival){
-      bits.push('<li><b>'+cap(pick.plan)+' beats '+cap(rival.plan)+' at this size:</b> '+
-        fmt$(pick.ev)+' against '+fmt$(rival.ev)+'. All three cap daily loss at 3%, so you trade '+sameRisk+
-        ' either way — what differs is the drawdown floor you survive inside ('+
-        PLANS[pick.plan].maxdd+'% vs '+PLANS[rival.plan].maxdd+'%) and the target you must clear ('+
-        PLANS[pick.plan].target+'% vs '+PLANS[rival.plan].target+'%).</li>');
+    // the same plan and size at the other firm — the cleanest like-for-like there is
+    const twin = all.find(o=>o.firm!==pick.firm && o.plan===pick.plan && o.size===pick.size);
+    if(twin){
+      const tk = keeps && keeps[twin.firm] ? keeps[twin.firm].keep : 1;
+      bits.push('<li><b>'+FIRMS[pick.firm].name+' over '+FIRMS[twin.firm].name+' on the same plan and size:</b> '+
+        fmt$(pick.ev)+' against '+fmt$(twin.ev)+'. Fees '+fmt$(pick.fee)+' vs '+fmt$(twin.fee)+
+        ', split '+pick.split+'% vs '+twin.split+'%, and after trading costs you keep '+
+        (keep*100).toFixed(0)+'% of a win there against '+(tk*100).toFixed(0)+'% here.</li>');
     }
 
-    // the next rung, and what it would take
+    const rival = all.filter(o=>o.size===pick.size && !(o.plan===pick.plan && o.firm===pick.firm) && o.ev>0)
+                     .sort((a,b)=>b.ev-a.ev)[0];
+    if(rival && rival.ev>pick.ev){
+      bits.push('<li><b>'+label(rival)+' is worth more — '+fmt$(rival.ev)+' — but wants '+fmt$(rival.need)+
+        ' behind it.</b> This is the most you can fund without one bad run ending it.</li>');
+    }
+
     const bigger = positive.filter(o=>o.need>bankroll && o.ev>pick.ev).sort((a,b)=>a.need-b.need)[0];
     if(bigger){
       bits.push('<li><b>Next step up: '+label(bigger)+'</b> at '+fmt$(bigger.ev)+' expected. '+
         'Set aside '+fmt$(bigger.need-bankroll)+' more and it becomes the right buy.</li>');
-    } else if(best.ev>pick.ev && best.need>bankroll){
-      bits.push('<li>The biggest number on the board is '+label(best)+' at '+fmt$(best.ev)+
-        ', but it wants '+fmt$(best.need)+' behind it. Not yet.</li>');
     } else {
-      bits.push('<li>This is the largest account your bankroll safely supports — going bigger adds ruin risk faster than it adds profit.</li>');
+      bits.push('<li>This is the largest account your bankroll safely supports at any firm — going bigger adds ruin risk faster than it adds profit.</li>');
     }
 
     if(isPaper($('plan').value)){
       bits.push('<li>You are on the paper account, so nothing is being spent. This is the challenge to buy once the journal shows the edge is real.</li>');
+    }
+    if(pick.firm!==FIRM_KEY){
+      bits.push('<li><b>This is not the firm you have selected above</b> — you are set to '+FIRM.name+
+        '. Switch the firm dropdown to '+FIRMS[pick.firm].name+' to size and check trades against its rules.</li>');
     }
     why.innerHTML=bits.join('');
   }
@@ -2877,20 +2921,31 @@
         for(const d of pts) if(Math.abs(d.w-w0)<Math.abs(here.w-w0)) here=d;
         renderChart(pts,{w:here.w,ev:here.ev});
         $('busy').textContent='comparing plans…';
-        const cmp={}; let j=0;
+        // Every firm, not just the selected one. A firm's costs change what a win is worth, so
+        // each is simulated at its own kept-R — otherwise the one with cheaper trading looks
+        // strictly worse purely because its eval fee is higher.
+        const jobs=[];
+        for(const fk of FIRM_KEYS) for(const k of FIRMS[fk].planKeys) jobs.push([fk,k]);
+        const cmpAll={}; FIRM_KEYS.forEach(fk=>cmpAll[fk]={});
+        const keeps={}; FIRM_KEYS.forEach(fk=>keeps[fk]=firmKeepRatio(fk));
+        let j=0;
         (function cstep(){
           if(token!==runToken) return;
           const t1=performance.now();
-          while(j<PLAN_KEYS.length && performance.now()-t1<40){
-            const k=PLAN_KEYS[j];
-            const rk = planRisk(k);   // each plan sized on its own drawdown, not a shared figure
-            cmp[k]=fullSim(Object.assign({},p,{risk:rk, target:PLANS[k].target/100, maxDD:PLANS[k].maxdd/100,
-              dailyDD:PLANS[k].dailydd/100, split:1, acct:1, cost:0}),4000,12345,true);
-            cmp[k].risk = rk;
+          while(j<jobs.length && performance.now()-t1<40){
+            const [fk,k]=jobs[j];
+            const pl=FIRMS[fk].plans[k];
+            const rk = planRisk(k, fk);
+            const keptR = p.R * keeps[fk].keep;
+            cmpAll[fk][k]=fullSim(Object.assign({},p,{risk:rk, R:keptR, target:pl.target/100,
+              maxDD:pl.maxdd/100, dailyDD:pl.dailydd/100, split:1, acct:1, cost:0}),4000,12345,true);
+            cmpAll[fk][k].risk = rk;
+            cmpAll[fk][k].keptR = keptR;
             j++;
           }
-          if(j<PLAN_KEYS.length){ setTimeout(cstep,0); return; }
-          renderRecommendation(cmp,p);
+          if(j<jobs.length){ setTimeout(cstep,0); return; }
+          const cmp = cmpAll[FIRM_KEY];      // the selected firm drives the ladder and plan card
+          renderRecommendation(cmpAll,p,keeps);
           buildPlan(p,main,cmp);
           renderLadder(cmp,p);
           $('busy').textContent='';
