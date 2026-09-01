@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="1c27e2f · 1 Sept 2026, 17:58">
+<meta name="build" content="c000924 · 1 Sept 2026, 18:59">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -306,9 +306,9 @@
   .ltrack .fill{position:absolute; top:0; bottom:0; border-radius:4px; background:var(--good); opacity:.8}
   .ltrack .fill.behind{background:var(--bad)}   /* the price is on the wrong side of your entry */
   .ltrack .mk{position:absolute; top:-4px; width:2px; height:16px; background:var(--muted); transform:translateX(-1px)}
-  .ltrack .mk.now{background:var(--ink); width:2px; height:18px; top:-5px}
   .ltrack .mk.best{background:var(--accent); width:3px; height:22px; top:-7px; border-radius:1px}
   .lpeak{display:block; font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--accent); margin-top:2px}
+  .lsub{display:block; font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--muted); margin-top:2px}
   .ltrack .cap{position:absolute; top:15px; font-size:11px; font-weight:600; color:var(--muted);
                font-family:"IBM Plex Mono",monospace; white-space:nowrap; max-width:48%; overflow:hidden}
   .ltrack .cap.l{left:0; transform:none; color:var(--bad)}
@@ -1377,7 +1377,7 @@
     const slipPx = ref!=null ? (exitPx-ref)*dir : 0;
     applyFirm(save);
     return {units, entry, dir, hours, blocks, bh, plat, gross, feeIn, feeOut, fin,
-            fees: feeIn+feeOut+fin, net, R: t.risk>0 ? net/t.risk : 0,
+            fees: feeIn+feeOut+fin, net, R: t.risk>0 ? net/t.risk : 0, Rg: t.risk>0 ? gross/t.risk : 0,
             ref, refName, slipPx, slip$: units*slipPx};
   }
   function liveState(t, px){
@@ -1704,11 +1704,13 @@
         '<span class="lflag" data-out="flag-'+id+'">'+liveFlag(L)+'</span></div>'+
       '<div class="lgrid">'+
         priceCell(t)+
-        '<div><span class="lk" data-out="pllabel-'+id+'">'+(locked?(t.alerted==='target'?'P/L at your target':'P/L at your stop'):'P/L if closed now')+'</span><span class="lv '+plCls(c)+'" data-out="pl-'+id+'">'+(c?fmt$2(c.net):'—')+'</span></div>'+
-        '<div><span class="lk" data-out="rlabel-'+id+'">'+(locked?'R locked in':'R so far')+'</span><span class="lv '+plCls(c)+'" data-out="r-'+id+'">'+(c?(c.R>=0?'+':'')+c.R.toFixed(2)+'R':'—')+'</span>'+
+        '<div><span class="lk" data-out="pllabel-'+id+'">'+(locked?(t.alerted==='target'?'P/L at your target':'P/L at your stop'):'P/L if closed now')+'</span><span class="lv '+(c&&c.gross>=0?'pos':c?'neg':'')+'" data-out="pl-'+id+'">'+(c?fmt$2(c.gross):'—')+'</span><span class="lsub">before costs</span></div>'+
+        '<div><span class="lk" data-out="rlabel-'+id+'">'+(locked?'R locked in':'R so far')+'</span><span class="lv '+(c&&c.Rg>=0?'pos':c?'neg':'')+'" data-out="rg-'+id+'">'+(c?(c.Rg>=0?'+':'')+c.Rg.toFixed(2)+'R':'—')+'</span>'+
           '<span class="lpeak" data-out="peak-'+id+'">'+peakLabel(t,c)+'</span></div>'+
         '<div><span class="lk">Held</span><span class="lv" data-out="held-'+id+'">'+(c?c.hours.toFixed(1)+'h':'—')+'</span></div>'+
         '<div><span class="lk" data-out="feelabel-'+id+'">'+(locked?'Costs':'Costs so far')+'</span><span class="lv" data-out="fees-'+id+'">'+(c?fmt$2(c.fees):'—')+'</span></div>'+
+        '<div><span class="lk">Net after costs</span><span class="lv '+plCls(c)+'" data-out="pln-'+id+'">'+(c?fmt$2(c.net):'—')+'</span>'+
+          '<span class="lsub" data-out="rn-'+id+'">'+(c?(c.R>=0?'+':'')+c.R.toFixed(2)+'R net':'')+'</span></div>'+
       '</div>'+
       track(t, L, id)+
       alertBanner(t)+
@@ -1771,8 +1773,9 @@
       const lvl = tgt ? +t.target : +t.stop;
       if(lvl>0){
         const c = settleCalc(t, lvl, Date.now(), tgt ? 'maker' : 'taker');
-        worth = ' — filling there is worth <b>'+fmt$2(c.net)+'</b> ('+(c.R>=0?'+':'')+c.R.toFixed(2)+
-                'R) after <b>'+fmt$2(c.fees)+'</b> of costs';
+        worth = ' — filling there moves <b>'+fmt$2(c.gross)+'</b> ('+(c.Rg>=0?'+':'')+c.Rg.toFixed(2)+
+                'R), less <b>'+fmt$2(c.fees)+'</b> of costs, netting <b>'+fmt$2(c.net)+'</b> ('+
+                (c.R>=0?'+':'')+c.R.toFixed(2)+'R)';
       }
     }
     return '<div class="lalert '+(tgt?'tgt':'stp')+'">'+
@@ -1809,7 +1812,6 @@
       '<div class="fill'+(g.ahead?'':' behind')+'" data-out="fill-'+id+'" style="left:'+(g.left*100).toFixed(1)+
         '%; width:'+(g.width*100).toFixed(1)+'%"></div>'+
       '<div class="mk" data-out="entry-'+id+'" style="left:'+(g.e*100).toFixed(1)+'%"></div>'+
-      '<div class="mk now" data-out="now-'+id+'" style="left:'+(g.p*100).toFixed(1)+'%"></div>'+
       '<div class="mk best" data-out="best-'+id+'"'+(g.b==null?' hidden':'')+
         ' style="left:'+((g.b==null?g.e:g.b)*100).toFixed(1)+'%" title="best reached '+
         (g.bestPx!=null?px6(g.bestPx):'—')+'"></div>'+
@@ -1833,8 +1835,10 @@
     const L = money ? liveState(t, px) : null;
     const set=(k,v,cls)=>{ const el=row.querySelector('[data-out="'+k+'-'+id+'"]'); if(!el) return;
       el.textContent=v; if(cls!=null){ el.classList.remove('pos','neg'); if(cls) el.classList.add(cls); } };
-    set('pl', c?fmt$2(c.net):'—', c?(c.net>=0?'pos':'neg'):'');
-    set('r',  c?(c.R>=0?'+':'')+c.R.toFixed(2)+'R':'—', c?(c.net>=0?'pos':'neg'):'');
+    set('pl',  c?fmt$2(c.gross):'—', c?(c.gross>=0?'pos':'neg'):'');
+    set('rg',  c?(c.Rg>=0?'+':'')+c.Rg.toFixed(2)+'R':'—', c?(c.Rg>=0?'pos':'neg'):'');
+    set('pln', c?fmt$2(c.net):'—', c?(c.net>=0?'pos':'neg'):'');
+    set('rn',  c?(c.R>=0?'+':'')+c.R.toFixed(2)+'R net':'');
     set('held', c?c.hours.toFixed(1)+'h':'—');
     set('fees', c?fmt$2(c.fees):'—');
     set('flag', liveFlag(L));
@@ -1842,10 +1846,9 @@
     if(L && L.hitStop) row.classList.add('hitStop');
     else if(L && L.hitTgt) row.classList.add('hitTgt');
     const g = barGeom(t, L);
-    const fill=row.querySelector('[data-out="fill-'+id+'"]'), now=row.querySelector('[data-out="now-'+id+'"]');
+    const fill=row.querySelector('[data-out="fill-'+id+'"]');
     if(fill){ fill.style.left=(g.left*100).toFixed(1)+'%'; fill.style.width=(g.width*100).toFixed(1)+'%';
               fill.classList.toggle('behind', !g.ahead); }
-    if(now)  now.style.left = (g.p*100).toFixed(1)+'%';
     const best=row.querySelector('[data-out="best-'+id+'"]');
     if(best){
       best.hidden = g.b==null;
