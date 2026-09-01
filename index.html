@@ -422,27 +422,23 @@
       </div>
 
       <div class="panel">
-        <h2>Breakout eval</h2>
+        <h2>Prop firm</h2>
+        <div class="field" style="margin-bottom:2px">
+          <select id="firm"></select>
+          <span class="hint" id="firmHint">—</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2 id="evalPanelTitle">Evaluation</h2>
         <div class="grid2">
           <div class="field">
             <label><span class="lbl">Plan</span></label>
-            <select id="plan">
-              <option value="classic" selected>Classic</option>
-              <option value="pro">Pro</option>
-              <option value="turbo">Turbo</option>
-              <option value="paper">Paper trading</option>
-            </select>
+            <select id="plan"></select>
           </div>
           <div class="field">
             <label><span class="lbl">Account</span></label>
-            <select id="acct">
-              <option value="5000">$5,000</option>
-              <option value="10000">$10,000</option>
-              <option value="25000" selected>$25,000</option>
-              <option value="50000">$50,000</option>
-              <option value="100000">$100,000</option>
-              <option value="200000">$200,000</option>
-            </select>
+            <select id="acct"></select>
           </div>
         </div>
         <div class="grid2">
@@ -463,17 +459,14 @@
             <input type="number" id="dailydd" min="0.5" max="50" step="0.5" value="3">
           </div>
         </div>
-        <div class="hint">Target and drawdowns follow the plan. Pick <strong>Paper trading</strong> to rehearse with no fee — same commissions, financing and drawdown rules, no money at risk — and edit the limits to mirror whichever plan you're aiming at. Classic tops out at $100K.</div>
+        <div class="hint" id="planHint">—</div>
       </div>
 
       <div class="panel">
         <h2>Funded &amp; payouts</h2>
         <div class="field">
           <label><span class="lbl">Profit split</span></label>
-          <select id="split">
-            <option value="80" selected>80 / 20 (standard)</option>
-            <option value="90">90 / 10 (paid upgrade)</option>
-          </select>
+          <select id="split"></select>
         </div>
         <div class="grid2">
           <div class="field">
@@ -677,10 +670,7 @@
         </div>
         <div class="field">
           <label><span class="lbl">Platform</span></label>
-          <select id="cPlat">
-            <option value="bo" selected>Breakout Terminal</option>
-            <option value="dx">DXtrade</option>
-          </select>
+          <select id="cPlat"></select>
         </div>
         <div class="hint" id="cFinHint">—</div>
         <div class="field" style="margin-top:12px">
@@ -777,7 +767,7 @@
 
       <div class="card">
         <h3>Cost breakdown</h3>
-        <p class="sub" id="cCostSub">Breakout charges 0.04% commission per side and 0.033% per day financing on notional.</p>
+        <p class="sub" id="cCostSub">—</p>
         <div style="overflow-x:auto"><table id="cCosts">
           <thead><tr><th>Item</th><th>Rate</th><th>Cost</th></tr></thead>
           <tbody></tbody>
@@ -880,31 +870,86 @@
   "use strict";
   const $ = id => document.getElementById(id);
 
-  const PLANS = { classic:{target:10,maxdd:6,dailydd:3}, pro:{target:12,maxdd:5,dailydd:3}, turbo:{target:9,maxdd:3,dailydd:3},
-    // Paper mirrors a real rule set so sizing, fees and drawdown behave identically —
-    // the only difference is that no fee is paid. Its rules stay editable to match
-    // whichever plan you're rehearsing for.
-    paper:{target:10,maxdd:6,dailydd:3} };
   const isPaper = k => k==='paper';
-  // live fees from breakoutprop.com/pricing (2026-08-30): [80/20 split, 90/10 split]
-  const FEES = {
-    classic:{5000:[45,54], 10000:[85,102], 25000:[215,258], 50000:[400,480], 100000:[800,960]},
-    pro:    {5000:[33,39], 10000:[65,78],  25000:[150,180], 50000:[280,336], 100000:[545,654], 200000:[1090,1308]},
-    turbo:  {5000:[20,24], 10000:[40,48],  25000:[95,114],  50000:[180,216], 100000:[330,396], 200000:[660,792]}
+
+  // ================= prop firms =================
+  // Each firm carries its own plan rules, fee table, cost model and day boundary. Everything
+  // downstream keeps reading the same names, so choosing a firm swaps the rules underneath
+  // without the rest of the tool needing to know there is more than one.
+  //
+  // Paper mirrors a real rule set so sizing, fees and drawdown behave identically — the only
+  // difference is that no fee is paid. Its limits stay editable to match whatever you rehearse.
+  const FIRMS = {
+    breakout: {
+      name:'Breakout', site:'breakoutprop.com', checked:'31 Aug 2026',
+      plans:{ classic:{target:10,maxdd:6,dailydd:3}, pro:{target:12,maxdd:5,dailydd:3},
+              turbo:{target:9,maxdd:3,dailydd:3}, paper:{target:10,maxdd:6,dailydd:3} },
+      planKeys:['classic','pro','turbo'],
+      planNames:{classic:'Classic', pro:'Pro', turbo:'Turbo'},
+      sizes:[5000,10000,25000,50000,100000,200000],
+      splits:[[80,'80 / 20 (standard)'],[90,'90 / 10 (paid upgrade)']],
+      // breakoutprop.com/pricing: [fee at 80/20, fee at 90/10]
+      fees:{
+        classic:{5000:[45,54], 10000:[85,102], 25000:[215,258], 50000:[400,480], 100000:[800,960]},
+        pro:    {5000:[33,39], 10000:[65,78],  25000:[150,180], 50000:[280,336], 100000:[545,654], 200000:[1090,1308]},
+        turbo:  {5000:[20,24], 10000:[40,48],  25000:[95,114],  50000:[180,216], 100000:[330,396], 200000:[660,792]}
+      },
+      commission:0.0004,                    // 0.04% of notional per side, flat
+      // Breakout charges its own financing, both directions, whichever way you are positioned.
+      financing:{kind:'flat', daily:0.00033, blockHours:4, directional:false},
+      dayRollMin:30,                        // the daily limit resets at 00:30 UTC
+      symbols:{ BTCUSD:[1000000,10], ETHUSD:[1000000,5] },
+      platforms:[['bo','Breakout Terminal'],['dx','DXtrade']],
+      capNote:'Classic tops out at $100K.'
+    },
+    propr: {
+      name:'Propr', site:'propr.xyz', checked:'1 Sep 2026',
+      // propr.xyz/rules. 1-Step accounts only — the Classic 2-Step runs a TRAILING drawdown
+      // across two stages, which this simulator does not model, so it is deliberately absent.
+      plans:{ classic:{target:10,maxdd:6,dailydd:3}, pro:{target:12,maxdd:5,dailydd:3},
+              turbo:{target:9,maxdd:3,dailydd:3}, paper:{target:10,maxdd:6,dailydd:3} },
+      planKeys:['classic','pro','turbo'],
+      planNames:{classic:'Classic 1-Step', pro:'Pro 1-Step', turbo:'Turbo 1-Step'},
+      sizes:[5000,10000,25000,50000,100000,200000],
+      splits:[[80,'80 / 20 (flat, no upgrade)']],
+      fees:{
+        classic:{5000:[60,60], 10000:[110,110], 25000:[275,275], 50000:[495,495], 100000:[999,999], 200000:[1998,1998]},
+        pro:    {5000:[45,45], 10000:[85,85],   25000:[185,185], 50000:[355,355], 100000:[699,699], 200000:[1399,1399]},
+        turbo:  {5000:[25,25], 10000:[50,50],   25000:[125,125], 50000:[245,245], 100000:[450,450], 200000:[899,899]}
+      },
+      // Hyperliquid fees passed through at cost, no markup. Base tier taker 0.045%, maker 0.015%.
+      commission:0.00045, makerCommission:0.00015,
+      // Funding is peer-to-peer and paid HOURLY, not charged by the firm. The interest component
+      // is fixed at 0.01% per 8h = 0.03%/day paid by longs to shorts, so a short is PAID it while
+      // the rate is positive. The premium component moves with the book; the live rate is read
+      // from Hyperliquid when it can be reached.
+      financing:{kind:'funding', daily:0.0003, blockHours:1, directional:true},
+      dayRollMin:0,                         // the daily limit resets at 00:00 UTC
+      symbols:{ BTCUSD:[1000000,10], ETHUSD:[1000000,10] },
+      platforms:[['hl','Hyperliquid']],
+      capNote:'All sizes available on every plan. Funded balances are capped at $300K in total.'
+    }
   };
-  const SIZES = [5000,10000,25000,50000,100000,200000];
-  const PLAN_KEYS = ['classic','pro','turbo'];
+  const FIRM_KEYS = Object.keys(FIRMS);
+
+  let FIRM_KEY='breakout', FIRM=FIRMS.breakout;
+  let PLANS, FEES, SIZES, PLAN_KEYS, SYMBOLS, COMMISSION, FIN_DAILY, FIN_BLOCK, DAY_ROLL_MIN;
+  function applyFirm(k){
+    FIRM_KEY = FIRMS[k] ? k : 'breakout';
+    FIRM = FIRMS[FIRM_KEY];
+    PLANS=FIRM.plans; FEES=FIRM.fees; SIZES=FIRM.sizes; PLAN_KEYS=FIRM.planKeys;
+    SYMBOLS=FIRM.symbols; COMMISSION=FIRM.commission;
+    FIN_DAILY=FIRM.financing.daily;
+    FIN_BLOCK=FIN_DAILY*FIRM.financing.blockHours/24;
+    DAY_ROLL_MIN=FIRM.dayRollMin;
+  }
+  applyFirm('breakout');
   const DEFAULTS = { winRate:'45', rr:'2', risk:'1', tpw:'3', plan:'classic', acct:'25000',
     target:'10', cost:'215', maxdd:'6', dailydd:'3', split:'80', payoutMode:'pct',
     payoutTrig:'5', horizon:'12', bankroll:'1000' };
   const STORE_KEY='breakout-eval-edge-v5';
   const JRN_KEY='breakout-eval-journal-v1';
 
-  // Breakout costs, from breakoutprop.com/symbols (checked 31 Aug 2026):
-  //  · commission 0.04% of notional, charged per side
-  //  · financing 3.3 bps (0.033%) per day on notional.
-  //    Breakout Terminal deducts it every 4 hours (so 1/6 of the daily rate per block).
-  //    DXtrade records open positions at 0000 UTC and deducts once at 0025 UTC.
   // Expected stop slippage in basis points OF PRICE, by symbol liquidity and market state.
   // Breakout publishes spreads as "variable based on centralized exchange liquidity" and no
   // slippage figures, so these are working estimates for crypto stop-market fills — deliberately
@@ -916,15 +961,6 @@
   };
   const DEFAULT_SLIP = {normal:10, volatile:50, extreme:200};
   const slipTable = sym => SLIP_BPS[sym] || DEFAULT_SLIP;
-  const COMMISSION = 0.0004;
-  const FIN_DAILY  = 0.00033;
-  const FIN_BLOCK  = FIN_DAILY/6;   // per 4-hour block on Breakout Terminal
-  // symbol: [max notional USD, leverage] — Breakout's published caps.
-  // Trimmed to what's actually traded; add rows here to bring more instruments back.
-  const SYMBOLS = {
-    BTCUSD:[1000000,10],
-    ETHUSD:[1000000,5]
-  };
 
   function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
 
@@ -1234,8 +1270,17 @@
   // ================= what a trade actually cost =================
   // Financing is charged per elapsed block, not per planned holding time, so a settled trade is
   // priced from the hours it was really open rather than from the estimate made before entry.
-  function finFor(hours, plat){
-    return plat==='dx' ? FIN_DAILY*Math.ceil(hours/24) : FIN_BLOCK*Math.ceil(hours/4);
+  // The rate you PAY over `hours`, as a fraction of notional. Negative means you are paid it.
+  // Breakout bills its own financing in 4h blocks (or once a day on DXtrade) whichever way you
+  // are positioned. Propr passes through Hyperliquid funding, which is hourly, peer-to-peer and
+  // signed: while the rate is positive, longs pay shorts.
+  function finFor(hours, plat, dir){
+    const f=FIRM.financing;
+    let rate;
+    if(f.kind==='funding') rate = f.daily*Math.ceil(Math.max(hours,0))/24;
+    else rate = (plat==='dx') ? FIN_DAILY*Math.ceil(hours/24) : FIN_BLOCK*Math.ceil(hours/4);
+    if(f.directional && dir==='short') rate = -rate;
+    return rate;
   }
   function openedMs(t){
     if(t.opened){ const v=Date.parse(t.opened); if(!isNaN(v)) return v; }
@@ -1252,7 +1297,7 @@
     const gross  = units*(exitPx-entry)*dir;
     const feeIn  = units*entry*COMMISSION;
     const feeOut = units*exitPx*COMMISSION;
-    const fin    = units*entry*finFor(hours, plat);
+    const fin    = units*entry*finFor(hours, plat, t.dir);
     const net    = gross - feeIn - feeOut - fin;
     // Slippage is measured against whichever level the fill landed nearest — that is the one
     // you were aiming at. Positive means it filled better than the level, negative means worse.
@@ -2396,11 +2441,8 @@
   }
 
   // ================= pre-trade checker =================
-  function finRate(){
-    const hold = Math.max(0, +$('cHold').value||0);
-    return $('cPlat').value==='bo'
-      ? FIN_BLOCK * Math.ceil(hold/4)      // Breakout Terminal: charged every 4 hours
-      : FIN_DAILY * Math.ceil(hold/24);    // DXtrade: charged once a day at 0025 UTC
+  function finRate(dir){
+    return finFor(Math.max(0, +$('cHold').value||0), $('cPlat').value, dir);
   }
 
   function checkerState(){
@@ -2425,7 +2467,6 @@
   // that is the boundary the daily loss limit counts against. Every date in this file is stamped
   // on this one clock; mixing a local close date with a UTC "today" mis-dated trades by a whole
   // day for the ten hours a day the two calendars disagree.
-  const DAY_ROLL_MIN = 30;
   function tradingDay(ms){
     return new Date((ms==null?Date.now():ms) - DAY_ROLL_MIN*60000).toISOString().slice(0,10);
   }
@@ -2507,7 +2548,9 @@
     const entry=+$('cEntry').value||0, stop=+$('cStop').value||0, tgt=+$('cTarget').value||0;
     const sym=$('cSym').value, symInfo=SYMBOLS[sym]||[Infinity,1];
     const stopDist=Math.abs(entry-stop);
-    const fin=finRate();
+    // direction decides the sign of funding on a firm that passes through a peer-to-peer rate
+    const cDir = tgt>0 ? (tgt>entry?'long':'short') : (stop<entry?'long':'short');
+    const fin=finRate(cDir);
     const sr=strategyRisk(st);
     const risk=sr.risk;
 
@@ -2555,12 +2598,13 @@
     // Financing is charged on notional, but risk is only the stop distance — so the daily bleed
     // measured against your risk is FIN_DAILY / (stop as a % of price). Tight stops bleed fastest.
     const stopPct = entry>0 ? stopDist/entry : 0;
-    const bleedPerDay = stopPct>0 ? FIN_DAILY/stopPct : 0;   // as a fraction of risk, per day
+    const finDailySigned = FIRM.financing.directional && cDir==='short' ? -FIN_DAILY : FIN_DAILY;
+    const bleedPerDay = stopPct>0 ? finDailySigned/stopPct : 0;   // as a fraction of risk, per day
     const finShare = risk>0 ? finFee/risk : 0;
     const holdH2 = Math.max(0,+$('cHold').value||0);
     const closeBy = new Date(Date.now()+holdH2*3600*1000);
     $('cFinHint').innerHTML = stopPct>0
-      ? `Holding costs <strong>${(bleedPerDay*100).toFixed(1)}% of your risk per day</strong> `+
+      ? `Holding ${bleedPerDay<0?'<strong style="color:var(--good)">pays you '+(Math.abs(bleedPerDay)*100).toFixed(1)+'% of your risk per day</strong>':'costs <strong>'+(bleedPerDay*100).toFixed(1)+'% of your risk per day</strong>'} `+
         `(${(FIN_DAILY*100).toFixed(3)}% of notional ÷ your ${(stopPct*100).toFixed(2)}% stop). `+
         `Budgeted for ${holdH2}h = <strong>${fmt$2(finFee)}</strong>, ${(finShare*100).toFixed(1)}% of risk — `+
         `so close or re-size by <strong>${melWhen(closeBy.getTime())}</strong> or you drift past budget.`
@@ -2618,19 +2662,21 @@
       : '—';
 
     const holdH=Math.max(0,+$('cHold').value||0);
-    const blocks = $('cPlat').value==='bo' ? Math.ceil(holdH/4) : Math.ceil(holdH/24);
-    const finLabel = $('cPlat').value==='bo'
-      ? `${(FIN_BLOCK*100).toFixed(4)}% × ${blocks} × 4h block${blocks===1?'':'s'}`
-      : `${(FIN_DAILY*100).toFixed(3)}% × ${blocks} day${blocks===1?'':'s'}`;
+    const bh = FIRM.financing.kind==='funding' ? 1 : ($('cPlat').value==='bo' ? 4 : 24);
+    const blocks = Math.ceil(holdH/bh);
+    const finLabel = FIRM.financing.kind==='funding'
+      ? `${(FIN_DAILY/24*100).toFixed(5)}%/h × ${blocks} hour${blocks===1?'':'s'}` + (cDir==='short' ? ' — paid to you' : '')
+      : bh===4
+        ? `${(FIN_BLOCK*100).toFixed(4)}% × ${blocks} × 4h block${blocks===1?'':'s'}`
+        : `${(FIN_DAILY*100).toFixed(3)}% × ${blocks} day${blocks===1?'':'s'}`;
     $('cCosts').querySelector('tbody').innerHTML = [
-      ['Commission in','0.040% of notional',entryFee],
-      ['Commission out (at stop)','0.040% of notional',exitFeeStop],
+      ['Commission in',(COMMISSION*100).toFixed(3)+'% of notional',entryFee],
+      ['Commission out (at stop)',(COMMISSION*100).toFixed(3)+'% of notional',exitFeeStop],
       ['Financing',finLabel,finFee],
       ['Total if stopped out','',totalCostStop],
-      ['Commission out (at target)','0.040% of notional',exitFeeTgt]
+      ['Commission out (at target)',(COMMISSION*100).toFixed(3)+'% of notional',exitFeeTgt]
     ].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${fmt$2(r[2])}</td></tr>`).join('');
-    $('cCostSub').textContent = `0.04% commission per side plus ${(FIN_DAILY*100).toFixed(3)}%/day financing on notional`+
-      ($('cPlat').value==='bo' ? ', deducted every 4 hours on the Breakout Terminal.' : ', deducted once daily at 00:25 UTC on DXtrade.');
+    $('cCostSub').textContent = costLine();
 
     const bcard=$('cBufferCard');
     if(sr.mode==='budget'){
@@ -2736,6 +2782,7 @@
     if(sr.capped) checks.push({s:'warn',t:'Risk trimmed to fit your remaining room',d:`Cut to ${fmt$2(risk)} so the trade stays inside the limits.`});
 
     if(finShare>0.25) checks.push({s:'fail',t:'Holding cost eats the trade',d:`${fmt$2(finFee)} financing is ${(finShare*100).toFixed(0)}% of your risk over ${holdH2}h. Widen the stop, shorten the hold, or skip it.`});
+    else if(finFee<0) checks.push({s:'ok',t:'You are paid to hold this',d:`Funding runs your way at ${(Math.abs(bleedPerDay)*100).toFixed(1)}% of risk per day — ${fmt$2(Math.abs(finFee))} over ${holdH2}h. It can flip if the premium turns, so do not build the plan on it.`});
     else if(finShare>0.12) checks.push({s:'warn',t:'Financing is a real drag here',d:`${fmt$2(finFee)} over ${holdH2}h = ${(finShare*100).toFixed(0)}% of risk, bleeding ${(bleedPerDay*100).toFixed(1)}%/day.`});
     else checks.push({s:'ok',t:'Holding cost budgeted',d:`${fmt$2(finFee)} for up to ${holdH2}h (${(bleedPerDay*100).toFixed(1)}% of risk per day). Close by then to stay inside it.`});
 
@@ -2894,9 +2941,6 @@
   const TF_HOLD = {15:6, 60:24, 240:96, 1440:336};
   $('cTF').addEventListener('change',()=>{ $('cHold').value = TF_HOLD[$('cTF').value]||24; renderChecker(); });
 
-  $('cSym').innerHTML = Object.keys(SYMBOLS)
-    .map(s=>`<option value="${s}">${s} · ${SYMBOLS[s][1]}× · max ${fmt$(SYMBOLS[s][0])}</option>`).join('');
-  $('cSym').value='BTCUSD';
 
   function updateStrat(){
     const m=$('cStrat').value;
@@ -2909,6 +2953,14 @@
     : 'You set the dollar risk; everything else is still checked against the rules.';
     renderChecker();
   }
+  $('firm').addEventListener('change',()=>{
+    applyFirm($('firm').value);
+    renderFirmUI();
+    updateRuleLock(); guardClassic200k(); updateFee(); applyAutoRisk();
+    stampClock(); saveState();
+    syncCheckerToday(); renderChecker(); renderLive(); renderJournal();
+    debounced();
+  });
   $('cStrat').addEventListener('change',updateStrat);
   ['cMaxTrades','cUsePct'].forEach(id=>$(id).addEventListener('input',renderChecker));
   $('cCond').addEventListener('change',renderChecker);
@@ -2934,7 +2986,7 @@
       acctId:(a?a.id:null),                     // the account this trade's limits belong to
       sym:lastPlanned.sym, dir:lastPlanned.dir, risk:Math.round(lastPlanned.risk*100)/100,
       pl:0, acct:(a?a.size:+$('acct').value), acctLabel:(a?a.label:null), status:'open',
-      paper: isPaper(a ? a.plan : $('plan').value), plat:$('cPlat').value,
+      paper: isPaper(a ? a.plan : $('plan').value), plat:$('cPlat').value, firm:FIRM_KEY,
       entry:lastPlanned.entry, stop:lastPlanned.stop, target:lastPlanned.tgt,
       units:lastPlanned.units, plannedR:lastPlanned.netR, plannedGrossR:lastPlanned.grossRR, plannedFees:lastPlanned.fees,
       mark:null, cleanLoss:lastPlanned.cleanLoss, note:''});
@@ -2943,6 +2995,63 @@
     $('cLogMsg').textContent='Logged. Track it on the Dashboard and settle it with the real fill when it closes.';
     setTimeout(()=>$('cLogMsg').textContent='',4000);
   });
+
+  // Every list that depends on the firm is rebuilt here, keeping the current choice where the
+  // new firm still offers it. Selecting a firm must never silently leave a value from the old
+  // one behind — a Breakout fee against Propr's rules would be wrong in a way nothing flags.
+  function renderFirmUI(){
+    const f=FIRM;
+    const keep = (sel, want) => { sel.value = [...sel.options].some(o=>o.value===String(want)) ? String(want) : sel.options[0].value; };
+
+    const fs_=$('firm');
+    if(!fs_.options.length){
+      fs_.innerHTML = FIRM_KEYS.map(k=>'<option value="'+k+'">'+esc(FIRMS[k].name)+'</option>').join('');
+    }
+    fs_.value = FIRM_KEY;
+    $('firmHint').textContent = f.name+' · rules and fees from '+f.site+', checked '+f.checked+
+      ' · daily limit resets '+(f.dayRollMin? '00:'+String(f.dayRollMin).padStart(2,'0') : '00:00')+' UTC';
+    $('evalPanelTitle').textContent = f.name+' eval';
+
+    const planWas=$('plan').value;
+    $('plan').innerHTML = f.planKeys.map(k=>'<option value="'+k+'">'+esc(f.planNames[k]||cap(k))+'</option>').join('')
+                        + '<option value="paper">Paper trading</option>';
+    keep($('plan'), planWas);
+
+    const acctWas=$('acct').value;
+    $('acct').innerHTML = f.sizes.map(z=>'<option value="'+z+'">'+fmt$(z)+'</option>').join('');
+    keep($('acct'), acctWas || 25000);
+
+    const splitWas=$('split').value;
+    $('split').innerHTML = f.splits.map(([v,l])=>'<option value="'+v+'">'+esc(l)+'</option>').join('');
+    keep($('split'), splitWas);
+
+    const platWas=$('cPlat').value;
+    $('cPlat').innerHTML = f.platforms.map(([v,l])=>'<option value="'+v+'">'+esc(l)+'</option>').join('');
+    keep($('cPlat'), platWas);
+
+    const symWas=$('cSym').value;
+    $('cSym').innerHTML = Object.keys(SYMBOLS)
+      .map(k=>'<option value="'+k+'">'+k+' · '+SYMBOLS[k][1]+'× · max '+fmt$(SYMBOLS[k][0])+'</option>').join('');
+    keep($('cSym'), symWas);
+
+    $('planHint').innerHTML = 'Target and drawdowns follow the plan. Pick <strong>Paper trading</strong> to rehearse '+
+      'with no fee — same commissions, financing and drawdown rules, no money at risk — and edit the limits to mirror '+
+      'whichever plan you are aiming at. '+esc(f.capNote);
+    $('cCostSub').textContent = costLine();
+  }
+
+  // one sentence describing what this firm charges you to hold a position
+  function costLine(){
+    const f=FIRM;
+    if(f.financing.kind==='funding')
+      return 'Hyperliquid fees at cost — '+(f.commission*100).toFixed(3)+'% taker / '+
+             (f.makerCommission*100).toFixed(3)+'% maker per side. Funding is peer-to-peer, paid hourly, '+
+             'currently '+(f.financing.daily*100).toFixed(3)+'%/day — longs pay it, shorts receive it.';
+    return (f.commission*100).toFixed(2)+'% commission per side plus '+(f.financing.daily*100).toFixed(3)+
+           '%/day financing on notional'+
+           ($('cPlat').value==='bo' ? ', deducted every 4 hours on the Breakout Terminal.'
+                                    : ', deducted once daily at 00:25 UTC on DXtrade.');
+  }
 
   function updateRuleLock(){
     // paper accounts keep their rules editable so they can mirror whichever plan you're rehearsing
@@ -3068,10 +3177,13 @@
       const s={}; FIELD_IDS.forEach(id=>s[id]=$(id).value);
       s.useTracked = $('useTracked').checked;
       s.autoRisk = $('autoRisk').checked;
+      s.firm = FIRM_KEY;
       localStorage.setItem(STORE_KEY, JSON.stringify(s));
     }catch(e){}
   }
   function applyState(s){
+    applyFirm(s.firm||'breakout');     // before any field is written, so the lists exist first
+    renderFirmUI();
     FIELD_IDS.forEach(id=>{ if(s[id]!=null) $(id).value=s[id]; });
     ['winRate','rr','risk'].forEach(id=>{ $(id+'N').value=$(id).value; showPair(id); });
     $('useTracked').checked = !!s.useTracked;
