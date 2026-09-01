@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="b7cabc7 · 1 Sept 2026, 15:53">
+<meta name="build" content="df998ba · 1 Sept 2026, 16:00">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -303,7 +303,8 @@
   .lgrid .lv{font-family:"IBM Plex Mono",monospace; font-size:15px; font-weight:600}
   .lgrid .lv.pos{color:var(--good)} .lgrid .lv.neg{color:var(--bad)}
   .ltrack{position:relative; height:8px; border-radius:4px; background:var(--raised); margin:18px 0 26px}
-  .ltrack .fill{position:absolute; top:0; bottom:0; left:0; border-radius:4px; background:var(--line); opacity:.75}
+  .ltrack .fill{position:absolute; top:0; bottom:0; border-radius:4px; background:var(--good); opacity:.8}
+  .ltrack .fill.behind{background:var(--bad)}   /* the price is on the wrong side of your entry */
   .ltrack .mk{position:absolute; top:-4px; width:2px; height:16px; background:var(--muted); transform:translateX(-1px)}
   .ltrack .mk.now{background:var(--accent); width:3px; height:20px; top:-6px}
   .ltrack .cap{position:absolute; top:15px; font-size:11px; font-weight:600; color:var(--muted);
@@ -1358,13 +1359,17 @@
   }
   function liveState(t, px){
     const dir = t.dir==='short' ? -1 : 1;
-    const stop=+t.stop||0, tgt=+t.target||0;
-    const span = (stop>0 && tgt>0) ? Math.abs(tgt-stop) : 0;
-    return {dir, stop, tgt, span,
+    const stop=+t.stop||0, tgt=+t.target||0, entry=entryOf(t);
+    const span = (stop>0 && tgt>0) ? Math.abs(tgt-stop) : 0;   // the bar's full width
+    const run  = (entry>0 && tgt>0) ? Math.abs(tgt-entry) : 0;  // entry to target
+    // where any price sits along the stop-to-target bar, 0 at the stop and 1 at the target
+    const at = x => span>0 ? (x-stop)*dir/span : null;
+    return {dir, stop, tgt, entry, span, run, at,
       hitStop: stop>0 && (dir>0 ? px<=stop : px>=stop),
       hitTgt:  tgt>0  && (dir>0 ? px>=tgt  : px<=tgt),
-      prog: span>0 ? (px-stop)*dir/span : null,
-      entryAt: span>0 ? (entryOf(t)-stop)*dir/span : null};
+      // negative means the trade is behind where you got in
+      prog: run>0 ? (px-entry)*dir/run : null,
+      nowAt: at(px), entryAt: at(entry)};
   }
   const entryOf = t => +t.entry||0;
   const clamp01 = v => Math.max(0, Math.min(1, v));
@@ -1643,7 +1648,8 @@
     return '<div class="live '+cls+'" data-row="'+id+'" data-mode="'+liveMode(t)+'">'+
       '<div class="lhead"><b>'+esc(t.sym||'—')+' '+dirTag(t)+'</b>'+
         '<span class="lacct">'+(t.entry? 'entry '+t.entry+' · ':'')+fmt$(t.risk)+' at risk · opened '+
-          esc(t.opened ? melDateTime(Date.parse(t.opened)) : (t.date||''))+'</span>'+
+          esc(t.opened ? melDateTime(Date.parse(t.opened)) : (t.date||''))+
+          ' · '+esc((t.firm && FIRMS[t.firm]) ? FIRMS[t.firm].name : FIRM.name)+'</span>'+
         '<span class="lflag" data-out="flag-'+id+'">'+liveFlag(L)+'</span></div>'+
       '<div class="lgrid">'+
         priceCell(t)+
@@ -1666,9 +1672,15 @@
   // there is nothing to fill in — and it is rewritten on every tick. Switching between the two
   // changes the markup, so the mode is stamped on the row and a change forces a full re-render.
   const liveMode = t => (livePx(t)!=null && !t.pinned) ? 'live' : 'manual';
+  const venueOf = t => feedOf((t.firm && FIRMS[t.firm]) ? t.firm : FIRM_KEY);
+  const venueTag = t => venueOf(t).src==='hl' ? 'HL' : 'OKX';
   function chipHtml(t){
-    if(liveMode(t)==='live') return '<span class="lchip '+(feedStale()?'stale':'okx')+'">OKX'+(feedStale()?' · stale':'')+'</span>';
-    return livePx(t)!=null ? '<button type="button" class="lchip pin" data-unpin="'+t.id+'">yours · back to OKX</button>' : '';
+    if(liveMode(t)==='live')
+      return '<span class="lchip '+(feedStale()?'stale':'okx')+'" title="marked against '+esc(venueOf(t).name)+'">'+
+             venueTag(t)+(feedStale()?' · stale':'')+'</span>';
+    return livePx(t)!=null
+      ? '<button type="button" class="lchip pin" data-unpin="'+t.id+'">yours · back to '+venueTag(t)+'</button>'
+      : '';
   }
   function priceCell(t){
     const id=t.id;
@@ -1696,16 +1708,28 @@
     if(!L) return 'enter a price';
     if(L.hitStop) return 'stop level reached — settle it';
     if(L.hitTgt)  return 'target reached — settle it';
-    return L.prog!=null ? Math.round(L.prog*100)+'% of the way to target' : 'running';
+    if(L.prog==null) return 'running';
+    const p=Math.round(L.prog*100);
+    return p<0 ? Math.abs(p)+'% against you' : p+'% of the way to target';
+  }
+  // fill geometry shared by the first render and every refresh, so the two cannot drift apart
+  function barGeom(t, L){
+    const dir = t.dir==='short' ? -1 : 1;
+    const stop=+t.stop||0, tgt=+t.target||0, entry=entryOf(t);
+    const span = Math.abs(tgt-stop);
+    const at = x => span>0 ? clamp01((x-stop)*dir/span) : 0;
+    const e = at(entry);
+    const p = (L && L.nowAt!=null) ? clamp01(L.nowAt) : e;
+    return {e, p, left:Math.min(e,p), width:Math.abs(p-e), ahead:p>=e};
   }
   function track(t, L, id){
     if(!(+t.stop>0 && +t.target>0)) return '<p class="lfoot">No stop and target recorded, so there is nothing to track against.</p>';
-    const p = L && L.prog!=null ? clamp01(L.prog) : 0;
-    const e = L && L.entryAt!=null ? clamp01(L.entryAt) : clamp01((entryOf(t)-(+t.stop))*(t.dir==='short'?-1:1)/Math.abs(+t.target-+t.stop));
+    const g = barGeom(t, L);
     return '<div class="ltrack">'+
-      '<div class="fill" data-out="fill-'+id+'" style="width:'+(p*100).toFixed(1)+'%"></div>'+
-      '<div class="mk" style="left:'+(e*100).toFixed(1)+'%"></div>'+
-      '<div class="mk now" data-out="now-'+id+'" style="left:'+(p*100).toFixed(1)+'%"></div>'+
+      '<div class="fill'+(g.ahead?'':' behind')+'" data-out="fill-'+id+'" style="left:'+(g.left*100).toFixed(1)+
+        '%; width:'+(g.width*100).toFixed(1)+'%"></div>'+
+      '<div class="mk" data-out="entry-'+id+'" style="left:'+(g.e*100).toFixed(1)+'%"></div>'+
+      '<div class="mk now" data-out="now-'+id+'" style="left:'+(g.p*100).toFixed(1)+'%"></div>'+
       '<div class="cap l">stop '+t.stop+'</div>'+
       '<div class="cap r">target '+t.target+'</div></div>';
   }
@@ -1733,10 +1757,11 @@
     row.classList.remove('hitStop','hitTgt');
     if(L && L.hitStop) row.classList.add('hitStop');
     else if(L && L.hitTgt) row.classList.add('hitTgt');
-    const p = L && L.prog!=null ? clamp01(L.prog)*100 : 0;
+    const g = barGeom(t, L);
     const fill=row.querySelector('[data-out="fill-'+id+'"]'), now=row.querySelector('[data-out="now-'+id+'"]');
-    if(fill) fill.style.width = p.toFixed(1)+'%';
-    if(now)  now.style.left   = p.toFixed(1)+'%';
+    if(fill){ fill.style.left=(g.left*100).toFixed(1)+'%'; fill.style.width=(g.width*100).toFixed(1)+'%';
+              fill.classList.toggle('behind', !g.ahead); }
+    if(now)  now.style.left = (g.p*100).toFixed(1)+'%';
   }
 
   // ================= journal =================
