@@ -2040,8 +2040,7 @@
     const s = journalStats();
     const edge = p.winRate*p.R - (1-p.winRate);
 
-    const a = activeAccount();
-    const sel = a ? a.plan : $('plan').value;
+    const sel = $('plan').value;
 
     // A paper account buys nothing, so there is no bankroll to ladder.
     if(isPaper(sel)){
@@ -2057,6 +2056,7 @@
 
     const planK = PLANS[sel] && cmp[sel] ? sel : 'classic';
     const pass = cmp[planK].passProb;
+    const heldPaper = (accounts||[]).some(x=>isPaper(x.plan));
 
     // Every rung's requirement depends only on the plan's fee and pass rate — never the bankroll.
     const rungs = SIZES.filter(sz=>FEES[planK][sz]).map(sz=>{
@@ -2072,7 +2072,7 @@
     const curSize = (!paused && affordable) ? affordable.sz : null;
 
     $('ladderPlan').innerHTML = `${cap(planK)} ladder — ${fmtPct(pass,0)} pass rate`+
-      (a ? ` <em>· your ${esc(a.label)} account</em>` : ` <em>· from the plan selected above</em>`);
+      ` <em>· the plan selected above</em>`;
 
     $('ladder').innerHTML = SIZES.map(sz=>{
       const r = rungs.find(x=>x.sz===sz);
@@ -2084,6 +2084,7 @@
     }).join('');
 
     const steps=[];
+    if(heldPaper) steps.push(`<strong>You are rehearsing on a paper account.</strong> Nothing below is spent until you actually buy one — this is what your ${fmt$(bankroll)} would fund on ${cap(planK)} the day the journal says you are ready.`);
     // A better plan is worth mentioning, but it never rearranges this ladder.
     const bestAnywhere = bestOption(cmp, splitIdx, p, bankroll);
     if(bestAnywhere && bestAnywhere.plan!==planK && affordable && bestAnywhere.ev>affordable.ev*1.15){
