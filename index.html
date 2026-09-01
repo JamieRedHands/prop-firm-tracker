@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="68ff37a · 2 Sept 2026, 08:21">
+<meta name="build" content="d8c9ea2 · 2 Sept 2026, 09:38">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -1731,6 +1731,11 @@
         '<span class="lflag" data-out="flag-'+id+'">'+liveFlag(L)+'</span></div>'+
       '<div class="lgrid">'+
         priceCell(t)+
+        (locked ? '' : (()=>{ const be=breakevenPx(t, Date.now());
+          return '<div><span class="lk">Breakeven now</span><span class="lv" data-out="be-'+id+'">'+
+                 (be!=null?px6(be):'—')+'</span>'+
+                 '<span class="lsub '+(be!=null&&px!=null&&(px-be)*(t.dir==='short'?-1:1)>=0?'pos':'')+
+                 '" data-out="besub-'+id+'">'+beSub(t,be,px)+'</span></div>'; })())+
         '<div><span class="lk" data-out="pllabel-'+id+'">'+(locked?(t.alerted==='target'?'P/L at your target':'P/L at your stop'):'P/L if closed now')+'</span><span class="lv '+(c&&c.gross>=0?'pos':c?'neg':'')+'" data-out="pl-'+id+'">'+(c?fmt$2(c.gross):'—')+'</span><span class="lsub">before costs</span></div>'+
         '<div><span class="lk" data-out="rlabel-'+id+'">'+(locked?'R locked in':'R so far')+'</span><span class="lv '+(c&&c.Rg>=0?'pos':c?'neg':'')+'" data-out="rg-'+id+'">'+(c?(c.Rg>=0?'+':'')+c.Rg.toFixed(2)+'R':'—')+'</span></div>'+
         '<div><span class="lk">Held</span><span class="lv" data-out="held-'+id+'">'+(c?c.hours.toFixed(1)+'h':'—')+'</span></div>'+
@@ -1751,6 +1756,27 @@
   const plCls = c => !c ? '' : (c.net>=0?'pos':'neg');
   const stopNow = t => (priceable(t) && +t.stop>0 && !t.alerted)
     ? settleCalc(t, +t.stop, Date.now(), 'taker') : null;
+  function breakevenPx(t, ms){
+    const entry=entryOf(t);
+    if(!(entry>0) || !(+t.units>0)) return null;
+    const dir = t.dir==='short' ? -1 : 1;
+    const save=FIRM_KEY; applyFirm(firmOf(t));
+    const cIn  = commRate(fillStyle(t.fill).entry);
+    const cOut = commRate('taker');                  // closing it now is a market exit
+    const fin  = finFor(Math.max(0,(ms-openedMs(t))/3600000), t.plat||'bo', t.dir, t.sym);
+    applyFirm(save);
+    const den = dir - cOut;
+    return den===0 ? null : entry*(dir + cIn + fin)/den;
+  }
+  // how far the price still has to travel before the round trip has paid for itself
+  function beSub(t, be, px){
+    if(be==null) return '';
+    if(px==null) return 'costs covered here';
+    const dir = t.dir==='short' ? -1 : 1;
+    const gap = (px-be)*dir, g = Math.abs(gap);
+    const shown = g.toLocaleString(undefined,{maximumFractionDigits: g>=100?1:2});
+    return gap>=0 ? 'past it by '+shown : shown+' to go';
+  }
   // the part of 1R that is pure price move — the rest is what the round trip costs
   const priceRiskOf = t => (+t.units>0 && +t.entry>0 && +t.stop>0)
     ? +t.units*Math.abs(+t.stop-+t.entry) : null;
@@ -1864,6 +1890,10 @@
     set('rn',  c?(c.R>=0?'+':'')+c.R.toFixed(2)+'R net':'');
     const sn2 = stopNow(t);
     if(sn2){ set('stp', fmt$2(sn2.net)); set('stpr', sn2.R.toFixed(2)+'R all in'); }
+    const be = breakevenPx(t, Date.now());
+    set('be',    be!=null?px6(be):'—');
+    set('besub', beSub(t, be, px),
+        be!=null && px!=null && (px-be)*(t.dir==='short'?-1:1)>=0 ? 'pos' : '');
     set('held', c?c.hours.toFixed(1)+'h':'—');
     set('fees', c?fmt$2(c.fees):'—');
     set('flag', liveFlag(L));
