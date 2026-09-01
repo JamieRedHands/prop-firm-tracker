@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="5c7c84d · 1 Sept 2026, 20:14">
+<meta name="build" content="191c288 · 1 Sept 2026, 20:36">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -746,7 +746,8 @@
           <div class="s" id="cSizeSub" style="font-size:12.5px; color:var(--sub); margin-top:4px">—</div>
         </div>
         <div class="side">
-          <div><div class="k">Max loss</div><div class="v" id="cRiskOut">—</div><div class="s" id="cRiskSub" style="font-size:11px;color:var(--muted);font-family:'IBM Plex Mono',monospace">—</div></div>
+          <div><div class="k">Risk (1R)</div><div class="v" id="cRiskOut">—</div><div class="s" id="cRiskSub" style="font-size:11px;color:var(--muted);font-family:'IBM Plex Mono',monospace">—</div></div>
+          <div><div class="k">If stopped, all in</div><div class="v" id="cAllIn">—</div><div class="s" id="cAllInSub" style="font-size:11px;color:var(--muted);font-family:'IBM Plex Mono',monospace">—</div></div>
           <div><div class="k">Reward</div><div class="v" id="cNetR">—</div><div class="s" id="cNetRSub" style="font-size:11px;color:var(--muted);font-family:'IBM Plex Mono',monospace">—</div></div>
           <div><div class="k">Notional</div><div class="v" id="cNotional">—</div></div>
         </div>
@@ -2863,8 +2864,10 @@
     const sizeCapped = wantUnits>0 && units < wantUnits*(1-1e-9);
     const capBy = sizeCapped ? (symInfo[0] <= st.equity*symInfo[1] ? 'the '+fmt$(symInfo[0])+' position cap'
                                                                   : 'your '+symInfo[1]+'x leverage') : null;
-    if(sizeCapped) risk = units*lossPerUnit;                   // what the allowed size really risks
-    const cleanLoss = units*lossPerUnit;                       // equals risk, by construction
+    const allInLoss = units*lossPerUnit;   // price move to the stop PLUS the round trip's costs
+    risk = units*stopDist;                 // 1R: the price risk, as a trader would quote it
+    const riskCosts = allInLoss - risk;    // what the costs add on top when the stop fills
+    const cleanLoss = allInLoss;
     const slippedStop = stop + (stop>entry ? slipPrice : -slipPrice);
     const slipCost = units*slipPrice;                          // the extra, drawn from the buffer
     const slip = stopDist>0 ? slipPrice/stopDist : 0;          // kept only for reporting
@@ -2892,7 +2895,7 @@
     const stopPct = entry>0 ? stopDist/entry : 0;
     const finDailySigned = FIRM.financing.directional && cDir==='short' ? -FIN_DAILY : FIN_DAILY;
     const bleedPerDay = stopPct>0 ? finDailySigned/stopPct : 0;   // as a fraction of risk, per day
-    const finShare = risk>0 ? finFee/risk : 0;
+    const finShare = risk>0 ? finFee/risk : 0;   // against 1R of price risk
     const holdH2 = Math.max(0,+$('cHold').value||0);
     const closeBy = new Date(Date.now()+holdH2*3600*1000);
     $('cFinHint').innerHTML = stopPct>0
@@ -2911,21 +2914,19 @@
     $('cSize').textContent = units>0 ? units.toLocaleString(undefined,{maximumFractionDigits:6}) : '—';
     $('cSize').className='ev';
     $('cSizeSub').textContent = units>0
-      ? `units of ${sym} — type this into ${FIRM.name} · stop ${fmt$2(stopDist)} away · a stop at your price costs exactly ${fmt$2(risk)}`
+      ? `units of ${sym} — type this into ${FIRM.name} · stop ${fmt$2(stopDist)} away · risking ${fmt$2(risk)}, ${fmt$2(allInLoss)} all in`
       : 'set entry, stop and a risk figure';
     const beR = p.winRate>0 ? (1-p.winRate)/p.winRate : Infinity;
     // Where the chart ratio goes. 1R is the whole budgeted risk, but only part of that budget is
     // the stop itself — the rest is the slippage buffer and the costs. Splitting the drop that
     // way shows fees for what they are instead of letting the buffer be blamed on them.
-    const gapFee  = lossPerUnit>0 ? grossRR*(costPerUnit/lossPerUnit) : 0;
-    const gapFeeWin = risk>0 ? (entryFee+exitFeeTgt+finFee)/risk : 0;
-    const feeR = gapFee + gapFeeWin;
+    const feeR = risk>0 ? (entryFee+exitFeeTgt+finFee)/risk : 0;   // costs on the winning side, in R
 
     $('cRiskOut').textContent = fmt$2(risk);
-    const priceRisk = units*stopDist;
-    $('cRiskSub').textContent =
-      `= 1R · ${fmt$2(priceRisk)} stop + ${fmt$2(risk-priceRisk)} costs`+
-      (sizeCapped ? ` · capped by ${capBy}, was ${fmt$2(sr.risk)}` : '');
+    $('cRiskSub').textContent = `= 1R · ${fmt$2(stopDist)} × ${(+units).toFixed(4)}`+
+      (sizeCapped ? ` · size capped by ${capBy}` : '');
+    $('cAllIn').textContent = fmt$2(allInLoss);
+    $('cAllInSub').textContent = `1R + ${fmt$2(riskCosts)} costs · ${(allInLoss/Math.max(risk,1)).toFixed(2)}R if stopped`;
     $('cNetR').textContent = tgt>0 ? grossRR.toFixed(2)+'R' : '—';
     $('cNetR').className = 'v ' + (!(tgt>0) ? '' : netR>=beR*1.25 ? 'pos' : netR>=beR ? 'warn' : 'neg');
     $('cNetRSub').textContent = tgt>0 ? `${netR.toFixed(2)}R net · ${fmt$2(netWin)}` : 'set a target';
@@ -2934,8 +2935,9 @@
     if(tgt>0 && grossRR>0){
       $('cGap').innerHTML =
         `<b>${grossRR.toFixed(2)}R</b> on the chart → <b>${netR.toFixed(2)}R</b> in the account. `+
-        `The whole <span class="g-fee">−${feeR.toFixed(2)}R</span> is commissions and financing (${fmt$2(totalCostStop)}), `+
-        `which bite because a ${(stopPct*100).toFixed(2)}% stop means ${fmt$(notional)} of notional per ${fmt$2(risk)} of risk. `+
+        `<span class="g-fee">−${feeR.toFixed(2)}R</span> is the commissions and financing on the winning side. `+
+        `Getting stopped costs more than 1R for the same reason: ${fmt$2(allInLoss)} rather than ${fmt$2(risk)}, `+
+        `because a ${(stopPct*100).toFixed(2)}% stop means ${fmt$(notional)} of notional per ${fmt$2(risk)} risked. `+
         `Slippage is not in here — the buffer carries it.`;
     }
     $('cNotional').textContent = fmt$(notional);
@@ -2954,7 +2956,7 @@
     $('cRR').className = 'v ' + (netR>=beR?'pos':'neg');
     $('cFees').textContent = fmt$2(totalCostStop);
     $('cFeesSub').textContent = risk>0
-      ? `commissions + financing · ${feeR.toFixed(2)}R of your reward · ${(totalCostStop/risk*100).toFixed(1)}% of the ${fmt$2(risk)} max loss`
+      ? `commissions + financing · ${feeR.toFixed(2)}R of your reward · ${(totalCostStop/risk*100).toFixed(1)}% of your ${fmt$2(risk)} risk`
       : '—';
 
     const holdH=Math.max(0,+$('cHold').value||0);
@@ -3026,7 +3028,7 @@
     } else $('cBudgetBar').innerHTML='';
 
     const checks=[];
-    const totalIfLost = risk + st.openRisk;
+    const totalIfLost = allInLoss + st.openRisk;   // the limits see the whole loss, costs included
     if(st.dailyRoom<=0) checks.push({s:'fail',t:'Already at or below the daily limit',d:`Equity ${fmt$(st.equity)} vs limit ${fmt$(st.dailyLimit)}.`});
     else if(totalIfLost >= st.dailyRoom) checks.push({s:'fail',t:'This trade can breach the daily limit',d:`${fmt$(totalIfLost)} at risk vs ${fmt$(st.dailyRoom)} of room.`});
     else if(sr.mode==='budget'){
@@ -3071,12 +3073,12 @@
       checks.push({s:'warn', t:'Size capped by '+capBy,
         d:`Your budget wanted ${(+wantUnits).toFixed(4)} units (${fmt$(wantUnits*entry)} notional). `+
           `${capBy.charAt(0).toUpperCase()+capBy.slice(1)} allows ${(+units).toFixed(4)} — ${fmt$(notional)}. `+
-          `So this trade risks ${fmt$2(risk)}, not the ${fmt$2(sr.risk)} your daily budget allowed.`});
+          `So it risks ${fmt$2(risk)} (${fmt$2(allInLoss)} all in), not the ${fmt$2(sr.risk)} your daily budget allowed.`});
     }
     else if(notional>maxSize*0.8) checks.push({s:'warn',t:'Near the symbol position cap',d:`${fmt$(notional)} of ${fmt$(maxSize)} allowed.`});
     else checks.push({s:'ok',t:'Within size and leverage limits',d:`${fmt$(notional)} notional · ${(notional/Math.max(st.equity,1)).toFixed(2)}× of equity · ${lev}× allowed on ${sym}.`});
 
-    if(sr.capped) checks.push({s:'warn',t:'Risk trimmed to fit your remaining room',d:`Cut to ${fmt$2(risk)} so the trade stays inside the limits.`});
+    if(sr.capped) checks.push({s:'warn',t:'Risk trimmed to fit your remaining room',d:`Cut to ${fmt$2(allInLoss)} all in so the trade stays inside the limits.`});
 
     if(finShare>0.25) checks.push({s:'fail',t:'Holding cost eats the trade',d:`${fmt$2(finFee)} financing is ${(finShare*100).toFixed(0)}% of your risk over ${holdH2}h. Widen the stop, shorten the hold, or skip it.`});
     else if(finFee<0) checks.push({s:'ok',t:'You are paid to hold this',d:`Funding runs your way at ${(Math.abs(bleedPerDay)*100).toFixed(1)}% of risk per day — ${fmt$2(Math.abs(finFee))} over ${holdH2}h. It can flip if the premium turns, so do not build the plan on it.`});
@@ -3104,7 +3106,7 @@
     // in the third, where they are stopped out.
     const rows=[
       {n:'Target hit', pl: st.todayPL + netWin, float: st.floatPL},
-      {n:'Stopped out', pl: st.todayPL - risk, float: st.floatPL},
+      {n:'Stopped out', pl: st.todayPL - allInLoss, float: st.floatPL},
       {n:'This plus every open position stops', pl: st.todayPL - totalIfLost, float: 0}
     ];
     $('cScenario').querySelector('tbody').innerHTML = rows.map(r=>{
@@ -3115,7 +3117,7 @@
              `<td class="${ddOk?'pos':'neg'}">${ddOk?'OK':'BREACH'}</td></tr>`;
     }).join('');
 
-    lastPlanned = {sym, entry, stop, tgt, units, risk, cleanLoss, notional, netR, grossRR, plannedGrossR:grossRR,
+    lastPlanned = {sym, entry, stop, tgt, units, risk, cleanLoss, allInLoss, notional, netR, grossRR, plannedGrossR:grossRR,
                    dir: tgt>0 ? (tgt>entry?'long':'short') : (stop<entry?'long':'short'),
                    fees: totalCostStop};
     $('cLog').disabled = !(units>0 && risk>0);
@@ -3299,6 +3301,7 @@
       paper: isPaper(a ? a.plan : $('plan').value), plat:$('cPlat').value, firm:FIRM_KEY, fill:$('cFill').value,
       entry:lastPlanned.entry, stop:lastPlanned.stop, target:lastPlanned.tgt,
       units:lastPlanned.units, plannedR:lastPlanned.netR, plannedGrossR:lastPlanned.grossRR, plannedFees:lastPlanned.fees,
+      allInLoss:lastPlanned.allInLoss,
       mark:null, cleanLoss:lastPlanned.cleanLoss, note:''});
     saveJournal(); renderJournal(); renderJournalStats(); syncCheckerToday(); renderLive();
     renderChecker();   // the logged trade consumes a slot and changes open risk — re-check now
