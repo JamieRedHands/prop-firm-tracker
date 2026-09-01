@@ -39,6 +39,8 @@
   #resetBtn:hover{color:var(--ink); border-color:var(--muted)}
   button:focus-visible{outline:2px solid var(--focus); outline-offset:1px}
 
+  .clocknote{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--muted); margin:-6px 0 10px}
+
   /* tabs */
   .tabs{display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:20px; flex-wrap:wrap}
   .tabs button{background:none; border:none; border-bottom:2px solid transparent; color:var(--sub);
@@ -371,6 +373,8 @@
     <h1>Prop Firm Edge</h1>
     <button id="resetBtn" type="button">Reset to defaults</button>
   </header>
+
+  <div class="clocknote" id="clockNote"></div>
 
   <div class="tabs" role="tablist">
     <button role="tab" id="tab-dash" aria-selected="true" aria-controls="view-dash">Dashboard</button>
@@ -1215,7 +1219,7 @@
   }
   function openedMs(t){
     if(t.opened){ const v=Date.parse(t.opened); if(!isNaN(v)) return v; }
-    if(t.date){ const v=Date.parse(t.date+'T00:00:00'); if(!isNaN(v)) return v; }
+    if(t.date){ const v=tzParse(t.date+'T00:00'); if(!isNaN(v)) return v; }
     return Date.now();
   }
   const priceable = t => (+t.units>0 && +t.entry>0);
@@ -1255,10 +1259,42 @@
   }
   const entryOf = t => +t.entry||0;
   const clamp01 = v => Math.max(0, Math.min(1, v));
-  function dtLocal(d){
-    const p=v=>String(v).padStart(2,'0');
-    return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes());
+  // ================= Melbourne time =================
+  // Every time on screen is Melbourne wall-clock, not the viewer's machine — someone opening
+  // this from another country must read the same clock you trade to. The IANA zone carries the
+  // AEST/AEDT switch itself, so daylight saving needs no handling here and no yearly upkeep.
+  const TZ = 'Australia/Melbourne';
+  const _fmt = (opts) => new Intl.DateTimeFormat('en-AU', Object.assign({timeZone:TZ}, opts));
+  function tzParts(ms){
+    const f=_fmt({year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',
+                  second:'2-digit',hourCycle:'h23'});
+    const p={}; for(const x of f.formatToParts(new Date(ms))) if(x.type!=='literal') p[x.type]=x.value;
+    return p;
   }
+  // Melbourne's offset from UTC at that instant, in ms (+10h or +11h)
+  function tzOffset(ms){
+    const p=tzParts(ms);
+    return Date.UTC(+p.year, +p.month-1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(ms/1000)*1000;
+  }
+  // a Melbourne wall-clock string ("2026-08-31T14:05") back to a real instant
+  function tzParse(str){
+    const m=/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(String(str||''));
+    if(!m) return NaN;
+    const wall=Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5]);
+    let ms=wall-tzOffset(wall);
+    return wall-tzOffset(ms);          // second pass settles the twice-yearly DST edge
+  }
+  const dtLocal = d => { const p=tzParts(typeof d==='number'?d:d.getTime());
+                         return p.year+'-'+p.month+'-'+p.day+'T'+p.hour+':'+p.minute; };
+  const melTime = ms => { const p=tzParts(ms); return p.hour+':'+p.minute; };
+  const melDateTime = ms => { const p=tzParts(ms); return p.year+'-'+p.month+'-'+p.day+' '+p.hour+':'+p.minute; };
+  const melWhen = ms => _fmt({weekday:'short', day:'numeric', month:'short', hour:'2-digit',
+                              minute:'2-digit', hourCycle:'h23'}).format(new Date(ms));
+  const tzAbbr = () => { const p=_fmt({timeZoneName:'short'}).formatToParts(new Date())
+                           .find(x=>x.type==='timeZoneName'); return p?p.value:'AEST'; };
+  // when Breakout's 00:30 UTC day-roll lands on a Melbourne clock — 10:30 or 11:30 depending on DST
+  const rollLocal = () => { const d=new Date(); d.setUTCHours(0,DAY_ROLL_MIN,0,0);
+                            return melTime(d.getTime()); };
   const dirTag = t => '<span class="dir '+(t.dir==='short'?'short':'long')+'">'+(t.dir==='short'?'SHORT':'LONG')+'</span>';
 
   // ================= OKX price feed =================
@@ -1434,7 +1470,7 @@
     return '<div class="live '+cls+'" data-row="'+id+'" data-mode="'+liveMode(t)+'">'+
       '<div class="lhead"><b>'+esc(t.sym||'—')+' '+dirTag(t)+'</b>'+
         '<span class="lacct">'+(t.entry? 'entry '+t.entry+' · ':'')+fmt$(t.risk)+' at risk · opened '+
-          esc((t.opened||t.date||'').slice(0,16).replace('T',' '))+'</span>'+
+          esc(t.opened ? melDateTime(Date.parse(t.opened)) : (t.date||''))+'</span>'+
         '<span class="lflag" data-out="flag-'+id+'">'+liveFlag(L)+'</span></div>'+
       '<div class="lgrid">'+
         priceCell(t)+
@@ -1476,7 +1512,7 @@
   function alertBanner(t){
     if(!t.alerted) return '';
     const tgt = t.alerted==='target';
-    const when = t.alertAt ? new Date(t.alertAt).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}) : '';
+    const when = t.alertAt ? melTime(Date.parse(t.alertAt)) : '';
     return '<div class="lalert '+(tgt?'tgt':'stp')+'">'+
       (tgt?'Target':'Stop')+' reached at '+px6(+t.alertPx||0)+(when?' · '+when:'')+
       ' — settle it with your actual fill'+
@@ -1611,7 +1647,7 @@
     const px = how==='win'  ? (+t.target||+t.mark||+t.entry||'')
              : how==='loss' ? (+t.stop  ||+t.mark||+t.entry||'')
              : (+t.mark||+t.entry||'');
-    settling = {id, how, exit:px||'', when:dtLocal(new Date()), override:''};
+    settling = {id, how, exit:px||'', when:dtLocal(Date.now()), override:''};
     // the panel lives on the Journal tab, so bring it into view wherever it was triggered from
     showView('view-jrn');
     renderJournal(); renderJournalStats();
@@ -1680,7 +1716,7 @@
       return;
     }
     const px = +$('sExit').value||0;
-    const ms = Date.parse($('sWhen').value) || Date.now();
+    const ms = tzParse($('sWhen').value) || Date.now();
     if(!(px>0)){ box.innerHTML='<div class="srow note">Enter the exit fill price to price the trade out.</div>'; return; }
     const c = settleCalc(t, px, ms);
     const net = ov!=null ? ov : c.net;
@@ -1714,7 +1750,7 @@
     const ov = ovRaw!=='' && !isNaN(+ovRaw) ? +ovRaw : null;
     if(priceable(t)){
       const px=+$('sExit').value||0;
-      const ms=Date.parse($('sWhen').value) || Date.now();
+      const ms=tzParse($('sWhen').value) || Date.now();
       if(!(px>0) && ov==null){ $('sMsg').textContent='Enter the exit price, or the P/L your broker shows.'; return; }
       if(px>0){
         const c=settleCalc(t,px,ms);
@@ -2317,6 +2353,13 @@
   function tradingDay(ms){
     return new Date((ms==null?Date.now():ms) - DAY_ROLL_MIN*60000).toISOString().slice(0,10);
   }
+  // The roll is a Breakout rule fixed to 00:30 UTC, so it is NOT converted — but it is worth
+  // knowing what time that is where you are, because it moves an hour with daylight saving.
+  function stampClock(){
+    const el=$('clockNote'); if(!el) return;
+    el.textContent = 'All times '+tzAbbr()+' (Melbourne) · '+melWhen(Date.now())+
+                     ' · Breakout\'s daily limit resets at '+rollLocal()+' your time';
+  }
   // Which trades are already logged today ON THE ACCOUNT BEING CHECKED. Each account carries its
   // own daily loss limit and its own drawdown floor, so a trade taken on another account must not
   // consume a slot here. Returns the trades themselves so the rule check can name them — an
@@ -2327,7 +2370,7 @@
   }
   const tradesToday = () => tradesTodayList().length;
   function describeTrade(t){
-    const when = t.opened ? new Date(t.opened).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}) : '';
+    const when = t.opened ? melTime(Date.parse(t.opened)) : '';
     return (t.sym||'trade')+' '+(t.dir==='short'?'short':'long')+(when?' '+when:'')+
            (t.status==='open' ? ' (open)' : ' ('+fmt$2(+t.pl||0)+')');
   }
@@ -2444,7 +2487,7 @@
       ? `Holding costs <strong>${(bleedPerDay*100).toFixed(1)}% of your risk per day</strong> `+
         `(${(FIN_DAILY*100).toFixed(3)}% of notional ÷ your ${(stopPct*100).toFixed(2)}% stop). `+
         `Budgeted for ${holdH2}h = <strong>${fmt$2(finFee)}</strong>, ${(finShare*100).toFixed(1)}% of risk — `+
-        `so close or re-size by <strong>${closeBy.toLocaleString([], {weekday:'short', hour:'2-digit', minute:'2-digit'})}</strong> or you drift past budget.`
+        `so close or re-size by <strong>${melWhen(closeBy.getTime())}</strong> or you drift past budget.`
       : 'Set an entry and stop to price the holding cost.';
 
     const grossRR = stopDist>0 && tgt>0 ? Math.abs(tgt-entry)/stopDist : 0;
@@ -2981,6 +3024,7 @@
   $('cDayStart').value = $('acct').value;
   renderAccounts(); syncAccountToChecker();
   renderJournal(); renderJournalStats(); renderLive(); syncCheckerToday(); updateStrat();
+  stampClock(); setInterval(stampClock, 30000);
   startFeed();
   recalc();
 })();
