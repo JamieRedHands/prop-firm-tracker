@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Position sizing, rule checks and a trade journal for Breakout Prop evaluations, with live OKX prices.">
+<meta name="build" content="8a16b24 · 1 Sept 2026, 13:14">
+<meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
 </head>
@@ -599,8 +600,9 @@
       </div>
 
       <footer>
+        <p id="buildStamp" style="font-family:'IBM Plex Mono',monospace; color:var(--muted)">build —</p>
         <p><strong>Method.</strong> 4,000 simulated eval attempts per recalc (fixed seed, so results are stable); every passing sim continues onto a funded account until it busts or the funded horizon runs out, with any remaining profit withdrawn at the end. Wins pay +R × risk, losses −1 × risk, drawn independently — real losing streaks cluster harder than that, so treat these as an optimistic ceiling. Your weekly trade count is spread across all 7 days; daily loss is checked against each day's starting balance, and max drawdown is a static floor from the initial balance.</p>
-        <p><strong>Defaults</strong> mirror Breakout's published 1-step plans (Classic 10% target / 6% static DD, Pro 12%/5%, Turbo 9%/3%, all 3% daily loss, no time limit). Fees taken from breakoutprop.com/pricing on 30 Aug 2026 for both splits; Classic tops out at $100K. Verify pricing before buying. Your inputs and journal are saved in this browser only. Not financial advice.</p>
+        <p><strong>Rules and fees</strong> are each firm's own published figures — breakoutprop.com/pricing (31 Aug 2026) and propr.xyz/rules (1 Sep 2026) — for 1-step plans only. Propr's Classic 2-Step uses a trailing drawdown across two stages and is deliberately not modelled here. Trading costs are Breakout's flat 0.04% per side with 0.033%/day financing, and for Propr the Hyperliquid rates it passes through at cost, where funding is peer-to-peer and a short can be paid it. Cross-firm comparisons use the 80/20 split both firms sell. Verify pricing before buying. Your inputs and journal are saved in this browser only. Not financial advice.</p>
       </footer>
     </div>
   </div>
@@ -3397,6 +3399,10 @@
   renderAccounts(); syncAccountToChecker();
   renderJournal(); renderJournalStats(); renderLive(); syncCheckerToday(); updateStrat();
   stampClock(); setInterval(stampClock, 30000);
+  {
+    const el=$('buildStamp'), m=document.querySelector('meta[name="build"]');
+    if(el) el.textContent = 'build '+(m ? m.content : 'dev') ;
+  }
   startFeed();
   recalc();
 })();
