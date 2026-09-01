@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="f841b82 · 1 Sept 2026, 20:10">
+<meta name="build" content="5c7c84d · 1 Sept 2026, 20:14">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -1698,8 +1698,8 @@
     const cls = L ? (L.hitStop?'hitStop':(L.hitTgt?'hitTgt':'')) : '';
     return '<div class="live '+cls+'" data-row="'+id+'" data-mode="'+liveMode(t)+'">'+
       '<div class="lhead"><b>'+esc(t.sym||'—')+' '+dirTag(t)+'</b>'+
-        '<span class="lacct">'+(t.entry? 'entry '+t.entry+' · ':'')+fmt$(t.risk)+' at risk'+
-          (priceRiskOf(t)!=null ? ' ('+fmt$(priceRiskOf(t))+' stop + '+fmt$(t.risk-priceRiskOf(t))+' costs)' : '')+' · opened '+
+        '<span class="lacct" title="'+(priceRiskOf(t)!=null ? fmt$2(priceRiskOf(t))+' to the stop plus '+fmt$2(t.risk-priceRiskOf(t))+' of costs' : '')+'">'+
+          (t.entry? 'entry '+t.entry+' · ':'')+fmt$(t.risk)+' at risk · opened '+
           esc(t.opened ? melDateTime(Date.parse(t.opened)) : (t.date||''))+
           ' · '+esc(FIRMS[firmOf(t)].name)+'</span>'+
         '<span class="lflag" data-out="flag-'+id+'">'+liveFlag(L)+'</span></div>'+
