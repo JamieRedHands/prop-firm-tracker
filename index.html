@@ -676,6 +676,15 @@
         </div>
         <div class="hint" id="cFinHint">—</div>
         <div class="field" style="margin-top:12px">
+          <label><span class="lbl">Order fills</span></label>
+          <select id="cFill">
+            <option value="mm" selected>Limit in, limit target</option>
+            <option value="mt">Limit in, market out</option>
+            <option value="tt">Market in, market out</option>
+          </select>
+          <div class="hint" id="cFillHint">—</div>
+        </div>
+        <div class="field" style="margin-top:12px">
           <label><span class="lbl">Market conditions</span></label>
           <select id="cCond">
             <option value="normal">Normal book</option>
@@ -873,6 +882,25 @@
   const $ = id => document.getElementById(id);
 
   const isPaper = k => k==='paper';
+
+  // ================= maker vs taker =================
+  // A resting limit order is a maker fill; anything that crosses the book is a taker fill.
+  // Breakout charges one flat rate either way, so it is effectively taker-priced on every fill.
+  // Propr passes Hyperliquid through, where a maker fill is a third of a taker one — which is
+  // the single biggest cost difference between the two firms and is worth pricing exactly.
+  //
+  // A stop is ALWAYS a taker fill: it becomes a market order the moment it triggers. No fill
+  // style can change that, so the stop leg is priced at the taker rate whatever you choose.
+  const commRate = kind => (kind==='maker' && FIRM.makerCommission!=null) ? FIRM.makerCommission : COMMISSION;
+  const FILL_STYLES = {
+    mm:{label:'Limit in, limit target', entry:'maker', target:'maker'},
+    mt:{label:'Limit in, market out',   entry:'maker', target:'taker'},
+    tt:{label:'Market in, market out',  entry:'taker', target:'taker'}
+  };
+  const fillStyle = () => FILL_STYLES[$('cFill') ? $('cFill').value : 'mm'] || FILL_STYLES.mm;
+  const entryComm  = () => commRate(fillStyle().entry);
+  const targetComm = () => commRate(fillStyle().target);
+  const stopComm   = () => commRate('taker');
 
   // ================= prop firms =================
   // Each firm carries its own plan rules, fee table, cost model and day boundary. Everything
@@ -1297,8 +1325,11 @@
     const plat = t.plat || 'bo';
     const blocks = plat==='dx' ? Math.ceil(hours/24) : Math.ceil(hours/4);
     const gross  = units*(exitPx-entry)*dir;
-    const feeIn  = units*entry*COMMISSION;
-    const feeOut = units*exitPx*COMMISSION;
+    // the exit is only a maker fill if it rested at the target; a stop or a manual close crosses
+    const save=FIRM_KEY; if(t.firm && FIRMS[t.firm]) applyFirm(t.firm);
+    const atTarget = +t.target>0 && Math.abs(exitPx-+t.target) < Math.abs(exitPx-(+t.stop||0));
+    const feeIn  = units*entry*entryComm();
+    const feeOut = units*exitPx*(atTarget ? targetComm() : commRate('taker'));
     const fin    = units*entry*finFor(hours, plat, t.dir);
     const net    = gross - feeIn - feeOut - fin;
     // Slippage is measured against whichever level the fill landed nearest — that is the one
@@ -1310,6 +1341,7 @@
       else { ref=tgt; refName='target'; }
     } else if(stop>0){ ref=stop; refName='stop'; }
     const slipPx = ref!=null ? (exitPx-ref)*dir : 0;
+    applyFirm(save);
     return {units, entry, dir, hours, blocks, plat, gross, feeIn, feeOut, fin,
             fees: feeIn+feeOut+fin, net, R: t.risk>0 ? net/t.risk : 0,
             ref, refName, slipPx, slip$: units*slipPx};
@@ -2053,8 +2085,8 @@
       const dir = tgt>entry ? 'long' : 'short';
       const plat = (FIRM.platforms[0]||['bo'])[0];
       const fin = finFor(hold, plat, dir);
-      const costStop = COMMISSION*entry + COMMISSION*stop + fin*entry;
-      const costTgt  = COMMISSION*entry + COMMISSION*tgt  + fin*entry;
+      const costStop = entryComm()*entry + stopComm()*stop + fin*entry;
+      const costTgt  = entryComm()*entry + targetComm()*tgt  + fin*entry;
       const lossPerUnit = stopDist + costStop;
       if(lossPerUnit>0){
         const grossRR = tgtDist/stopDist;
@@ -2613,7 +2645,7 @@
     // position to cover a cost that is already provisioned for once.
     const bps = slipTable(sym)[$('cCond').value];
     const slipPrice = entry*bps/10000;
-    const costPerUnit = COMMISSION*entry + COMMISSION*stop + fin*entry;
+    const costPerUnit = entryComm()*entry + stopComm()*stop + fin*entry;   // the losing leg: stop is always taker
     const lossPerUnit = stopDist + costPerUnit;
     const units = lossPerUnit>0 ? risk/lossPerUnit : 0;
     const cleanLoss = units*lossPerUnit;                       // equals risk, by construction
@@ -2621,7 +2653,7 @@
     const slipCost = units*slipPrice;                          // the extra, drawn from the buffer
     const slip = stopDist>0 ? slipPrice/stopDist : 0;          // kept only for reporting
     const notional = units*entry;
-    const entryFee = units*entry*COMMISSION;
+    const entryFee = units*entry*entryComm();
     {
       const bb = sr.mode==='budget' ? budgetPlan(st) : null;
       const buffer = bb ? bb.allowance-bb.usable : 0;
@@ -2635,7 +2667,7 @@
           (buffer>0 && slipCost*Math.max(1,(bb?bb.left:1))>buffer
             ? '<br><span style="color:var(--warn)">Every remaining stop slipping this far would outrun the buffer — widen the stop or hold back more of the limit.</span>' : '');
     }
-    const exitFeeStop = units*stop*COMMISSION;   // matches the price the sizing assumes
+    const exitFeeStop = units*stop*stopComm();   // matches the price the sizing assumes
     const finFee = units*entry*fin;
     const totalCostStop = entryFee+exitFeeStop+finFee;
 
@@ -2655,7 +2687,7 @@
       : 'Set an entry and stop to price the holding cost.';
 
     const grossRR = stopDist>0 && tgt>0 ? Math.abs(tgt-entry)/stopDist : 0;
-    const exitFeeTgt = units*tgt*COMMISSION;
+    const exitFeeTgt = units*tgt*targetComm();
     const netWin = tgt>0 ? units*Math.abs(tgt-entry) - entryFee - exitFeeTgt - finFee : 0;
     const netR = risk>0 && tgt>0 ? netWin/risk : 0;
 
@@ -2714,11 +2746,11 @@
         ? `${(FIN_BLOCK*100).toFixed(4)}% × ${blocks} × 4h block${blocks===1?'':'s'}`
         : `${(FIN_DAILY*100).toFixed(3)}% × ${blocks} day${blocks===1?'':'s'}`;
     $('cCosts').querySelector('tbody').innerHTML = [
-      ['Commission in',(COMMISSION*100).toFixed(3)+'% of notional',entryFee],
-      ['Commission out (at stop)',(COMMISSION*100).toFixed(3)+'% of notional',exitFeeStop],
+      ['Commission in · '+fillStyle().entry,(entryComm()*100).toFixed(3)+'% of notional',entryFee],
+      ['Commission out at stop · taker',(stopComm()*100).toFixed(3)+'% of notional',exitFeeStop],
       ['Financing',finLabel,finFee],
       ['Total if stopped out','',totalCostStop],
-      ['Commission out (at target)',(COMMISSION*100).toFixed(3)+'% of notional',exitFeeTgt]
+      ['Commission out at target · '+fillStyle().target,(targetComm()*100).toFixed(3)+'% of notional',exitFeeTgt]
     ].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${fmt$2(r[2])}</td></tr>`).join('');
     $('cCostSub').textContent = costLine();
 
@@ -3019,6 +3051,7 @@
   $('cStrat').addEventListener('change',updateStrat);
   ['cMaxTrades','cUsePct'].forEach(id=>$(id).addEventListener('input',renderChecker));
   $('cCond').addEventListener('change',renderChecker);
+  $('cFill').addEventListener('change',()=>{ renderChecker(); debounced(); });
 
   $('cAcctSel').addEventListener('change',()=>{
     const v=$('cAcctSel').value;
@@ -3041,7 +3074,7 @@
       acctId:(a?a.id:null),                     // the account this trade's limits belong to
       sym:lastPlanned.sym, dir:lastPlanned.dir, risk:Math.round(lastPlanned.risk*100)/100,
       pl:0, acct:(a?a.size:+$('acct').value), acctLabel:(a?a.label:null), status:'open',
-      paper: isPaper(a ? a.plan : $('plan').value), plat:$('cPlat').value, firm:FIRM_KEY,
+      paper: isPaper(a ? a.plan : $('plan').value), plat:$('cPlat').value, firm:FIRM_KEY, fill:$('cFill').value,
       entry:lastPlanned.entry, stop:lastPlanned.stop, target:lastPlanned.tgt,
       units:lastPlanned.units, plannedR:lastPlanned.netR, plannedGrossR:lastPlanned.grossRR, plannedFees:lastPlanned.fees,
       mark:null, cleanLoss:lastPlanned.cleanLoss, note:''});
@@ -3093,16 +3126,28 @@
       'with no fee — same commissions, financing and drawdown rules, no money at risk — and edit the limits to mirror '+
       'whichever plan you are aiming at. '+esc(f.capNote);
     $('cCostSub').textContent = costLine();
+    renderFillHint();
+  }
+
+  function renderFillHint(){
+    const el=$('cFillHint'); if(!el) return;
+    const f=fillStyle();
+    const mk=commRate('maker'), tk=commRate('taker');
+    el.innerHTML = mk<tk
+      ? 'Maker <strong>'+(mk*100).toFixed(3)+'%</strong> vs taker <strong>'+(tk*100).toFixed(3)+'%</strong> at '+esc(FIRM.name)+
+        ' — resting a limit order costs <strong>'+(tk/mk).toFixed(1)+'× less</strong>. A stop always fills at taker, whatever you pick here.'
+      : esc(FIRM.name)+' charges the same <strong>'+(tk*100).toFixed(3)+'%</strong> whether you rest an order or cross the book, so this only changes the slippage you should expect, not the fee.';
   }
 
   // one sentence describing what this firm charges you to hold a position
   function costLine(){
     const f=FIRM;
     if(f.financing.kind==='funding')
-      return 'Hyperliquid fees at cost — '+(f.commission*100).toFixed(3)+'% taker / '+
-             (f.makerCommission*100).toFixed(3)+'% maker per side. Funding is peer-to-peer, paid hourly, '+
-             'currently '+(f.financing.daily*100).toFixed(3)+'%/day — longs pay it, shorts receive it.';
-    return (f.commission*100).toFixed(2)+'% commission per side plus '+(f.financing.daily*100).toFixed(3)+
+      return 'Hyperliquid fees at cost — '+(f.makerCommission*100).toFixed(3)+'% maker / '+
+             (f.commission*100).toFixed(3)+'% taker per side, so a resting limit costs a third of a market fill. '+
+             'Funding is peer-to-peer, paid hourly, currently '+(f.financing.daily*100).toFixed(3)+
+             '%/day — longs pay it, shorts receive it.';
+    return (f.commission*100).toFixed(2)+'% commission per side, maker or taker alike, plus '+(f.financing.daily*100).toFixed(3)+
            '%/day financing on notional'+
            ($('cPlat').value==='bo' ? ', deducted every 4 hours on the Breakout Terminal.'
                                     : ', deducted once daily at 00:25 UTC on DXtrade.');
@@ -3227,12 +3272,14 @@
 
   // ================= persistence =================
   const FIELD_IDS = Object.keys(DEFAULTS);
+  const EXTRA_IDS = ['cFill','cCond','cPlat','cHold','cMaxTrades','cUsePct','cSym'];
   function saveState(){
     try{
       const s={}; FIELD_IDS.forEach(id=>s[id]=$(id).value);
       s.useTracked = $('useTracked').checked;
       s.autoRisk = $('autoRisk').checked;
       s.firm = FIRM_KEY;
+      EXTRA_IDS.forEach(id=>{ if($(id)) s[id]=$(id).value; });
       localStorage.setItem(STORE_KEY, JSON.stringify(s));
     }catch(e){}
   }
@@ -3240,6 +3287,7 @@
     applyFirm(s.firm||'breakout');     // before any field is written, so the lists exist first
     renderFirmUI();
     FIELD_IDS.forEach(id=>{ if(s[id]!=null) $(id).value=s[id]; });
+    EXTRA_IDS.forEach(id=>{ if(s[id]!=null && $(id)) $(id).value=s[id]; });
     ['winRate','rr','risk'].forEach(id=>{ $(id+'N').value=$(id).value; showPair(id); });
     $('useTracked').checked = !!s.useTracked;
     $('autoRisk').checked = s.autoRisk!==false;      // derived risk is the default
