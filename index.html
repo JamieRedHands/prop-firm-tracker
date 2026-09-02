@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="ebe107a · 2 Sept 2026, 10:49">
+<meta name="build" content="6aedd84 · 2 Sept 2026, 10:57">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -243,7 +243,6 @@
   .passbtn{width:100%; margin:-2px 0 8px}
   .paperbtn{display:inline-block; margin-top:7px; padding:6px 13px; font-size:12px}
   .firmsel{width:auto; flex:none; font-size:11px; padding:4px 6px; border-color:var(--accent)}
-  .papernote{display:block; margin-top:5px; color:var(--good); font-size:12.5px}
   .verdictBox{border-radius:10px; padding:16px 18px; border:1px solid var(--border); background:var(--inset); margin-bottom:14px}
   .verdictBox.clear{border-color:var(--good); background:rgba(34,180,85,.10)}
   .verdictBox.caution{border-color:var(--warn); background:rgba(224,163,46,.10)}
@@ -1236,7 +1235,7 @@
   function paperCTA(){
     const have = accounts.find(a=>isPaper(a.plan));
     return have
-      ? '<span class="papernote">Log them to <b>'+esc(have.label)+'</b> — pick it in the Pre-Trade Check, then Log this trade to journal.</span>'
+      ? ' <span class="papernote">Log them to <b>'+esc(have.label)+'</b> — pick it in the Pre-Trade Check, then Log this trade to journal.</span>'
       : '<button class="btn paperbtn" type="button" data-paper="1">Open a $10,000 paper account</button>';
   }
   // Same rules, commissions and financing as a bought account. The size is arbitrary — it is the
