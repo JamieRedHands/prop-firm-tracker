@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="1fbe309 · 2 Sept 2026, 10:26">
+<meta name="build" content="ebe107a · 2 Sept 2026, 10:49">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -241,6 +241,9 @@
   .acctrow.funded .pick .acctgoal .bar i{background:var(--good)}
   .acctrow.hit .pick{border-color:var(--good); background:rgba(34,180,85,.10); color:var(--ink)}
   .passbtn{width:100%; margin:-2px 0 8px}
+  .paperbtn{display:inline-block; margin-top:7px; padding:6px 13px; font-size:12px}
+  .firmsel{width:auto; flex:none; font-size:11px; padding:4px 6px; border-color:var(--accent)}
+  .papernote{display:block; margin-top:5px; color:var(--good); font-size:12.5px}
   .verdictBox{border-radius:10px; padding:16px 18px; border:1px solid var(--border); background:var(--inset); margin-bottom:14px}
   .verdictBox.clear{border-color:var(--good); background:rgba(34,180,85,.10)}
   .verdictBox.caution{border-color:var(--warn); background:rgba(224,163,46,.10)}
@@ -1183,9 +1186,12 @@
         return `
         <div class="acctrow ${a.id===activeAcctId?'cur':''} ${a.stage==='funded'?'funded':''} ${ready?'hit':''}">
           <button class="pick" data-pick="${a.id}" title="Use this account for the Pre-Trade Check">
-            <b>${esc(a.label)}${chip}</b><span>${isPaper(a.plan)?'Paper':cap(a.plan)} · ${fmt$(a.size)} · bal ${fmt$(a.bal)}</span>
+            <b>${esc(a.label)}${chip}</b><span>${acctFirmName(a) ? esc(acctFirmName(a))+' · ' : ''}${isPaper(a.plan)?'Paper':cap(a.plan)} · ${fmt$(a.size)} · bal ${fmt$(a.bal)}</span>
             ${a.fundedId ? '<span class="acctgoal">passed '+esc(melDateTime(Date.parse(a.passedAt||Date.now())))+' · funded account opened</span>' : goalLine(g)}
           </button>
+          ${acctFirm(a) ? '' : `<select class="firmsel" data-firm="${a.id}" title="Which firm is this account with?">
+            <option value="">firm?</option>${Object.keys(FIRMS).map(k=>'<option value="'+k+'">'+esc(FIRMS[k].name)+'</option>').join('')}
+          </select>`}
           <button class="del" data-del="${a.id}" title="Close account" aria-label="Close account">×</button>
         </div>`+(ready ? `<button class="btn win passbtn" data-pass="${a.id}">Passed — open the funded account</button>` : '');
       }).join('');
@@ -1193,6 +1199,10 @@
         activeAcctId=+b.dataset.pick;
         saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
         renderJournal(); renderJournalStats(); renderLive();
+      }));
+      $('acctList').querySelectorAll('[data-firm]').forEach(sel=>sel.addEventListener('change',()=>{
+        const a=acctById(+sel.dataset.firm);
+        if(a && FIRMS[sel.value]){ a.firm=sel.value; saveAccounts(); renderAccounts(); renderJournal(); renderChecker(); }
       }));
       $('acctList').querySelectorAll('[data-pass]').forEach(b=>b.addEventListener('click',()=>{
         const a=acctById(+b.dataset.pass); if(a) promoteToFunded(a);
@@ -1209,7 +1219,7 @@
     // checker dropdown
     const sel=$('cAcctSel');
     sel.innerHTML = accounts.length
-      ? accounts.map(a=>`<option value="${a.id}">${esc(a.label)} — ${isPaper(a.plan)?'Paper':cap(a.plan)} ${fmt$(a.size)}</option>`).join('')
+      ? accounts.map(a=>`<option value="${a.id}">${esc(a.label)} — ${acctFirmName(a) ? esc(acctFirmName(a))+' ' : ''}${isPaper(a.plan)?'Paper':cap(a.plan)} ${fmt$(a.size)}${a.stage==='funded'?' funded':''}</option>`).join('')
       : '<option value="">Using Dashboard settings</option>';
     if(accounts.length && activeAcctId!=null) sel.value=String(activeAcctId);
     const act=activeAccount(), actG=act?acctGoal(act):null;
@@ -1221,6 +1231,29 @@
           ? 'Switch accounts here or on the Dashboard — the limits below follow it. '+
             fmt$(actG.made)+' of '+fmt$(actG.need)+' '+actG.what+'.'
           : 'Switch accounts here or on the Dashboard — the limits below follow it.';
+  }
+
+  function paperCTA(){
+    const have = accounts.find(a=>isPaper(a.plan));
+    return have
+      ? '<span class="papernote">Log them to <b>'+esc(have.label)+'</b> — pick it in the Pre-Trade Check, then Log this trade to journal.</span>'
+      : '<button class="btn paperbtn" type="button" data-paper="1">Open a $10,000 paper account</button>';
+  }
+  // Same rules, commissions and financing as a bought account. The size is arbitrary — it is the
+  // R multiples and the win rate you are measuring, and those do not care about the balance.
+  function openPaperAccount(){
+    const have = accounts.find(a=>isPaper(a.plan));
+    if(have) activeAcctId = have.id;
+    else {
+      const size=10000;
+      const a={id:Date.now(), label:'Paper '+fmt$(size), plan:'paper', size, bal:size,
+               stage:'eval', firm:FIRM_KEY};
+      accounts.push(a); activeAcctId=a.id;
+    }
+    saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
+    renderJournal(); renderJournalStats(); renderLive();
+    const box=$('planSteps').querySelector('[data-paper]');
+    if(box) box.outerHTML = paperCTA();
   }
 
   function promoteToFunded(a){
@@ -1296,6 +1329,14 @@
     if(a) return a.label;
     return (sample && sample.acctLabel) ? sample.acctLabel+' · closed' : 'Closed account';
   }
+  function acctFirm(a){
+    if(a && a.firm && FIRMS[a.firm]) return a.firm;
+    if(!a) return null;
+    const seen = new Set(journal.filter(t=>jAcct(t)===a.id).map(firmOf));
+    if(seen.size===1){ a.firm=[...seen][0]; saveAccounts(); return a.firm; }
+    return null;                                   // no trades yet, or trades from both firms
+  }
+  const acctFirmName = a => { const f=acctFirm(a); return f ? FIRMS[f].name : null; };
   const acctProfit = a => journal.reduce((x,t)=>
     x + ((jAcct(t)===a.id && t.status!=='open') ? (+t.pl||0) : 0), 0);
   const planRulesFor = a => (((FIRMS[a.firm]||{}).plans)||PLANS)[a.plan] || PLANS[a.plan] || {};
@@ -1320,7 +1361,8 @@
     const a=acctById(id);
     if(!a) return id===null ? 'Dashboard settings' : 'account no longer open';
     const r=PLANS[a.plan]||{};
-    return (isPaper(a.plan)?'Paper':cap(a.plan))+' '+fmt$(a.size)+' '+(a.stage==='funded'?'funded':'eval')+
+    return (acctFirmName(a) ? acctFirmName(a)+' · ' : '')+
+           (isPaper(a.plan)?'Paper':cap(a.plan))+' '+fmt$(a.size)+' '+(a.stage==='funded'?'funded':'eval')+
            ' · '+r.dailydd+'% daily / '+r.maxdd+'% max DD';
   }
   // The Journal tab's own view filter. It never touches the Pre-Trade Check, which always
@@ -1346,7 +1388,8 @@
     const used=new Set(journal.map(jAcct));
     let html='<option value="all">All accounts</option>';
     accounts.forEach(a=>{
-      html+='<option value="'+a.id+'">'+esc(a.label)+(a.id===activeAcctId?' — selected':'')+'</option>';
+      html+='<option value="'+a.id+'">'+esc(a.label)+(acctFirmName(a)?' · '+esc(acctFirmName(a)):'')+
+             (a.id===activeAcctId?' — selected':'')+'</option>';
     });
     // accounts closed since, that still own history, plus anything logged without an account
     [...used].filter(id=>id!==null && !acctById(id)).forEach(id=>{
@@ -2341,12 +2384,13 @@
       steps.push(`<strong>Only ${fmtPct(main.beatProb)} of attempts return more than the fee.</strong> The average is carried by a thin tail of lucky runs — most of the time you simply lose ${fmt$(p.cost)}.`);
       steps.push(`<strong>This number is fragile.</strong> It assumes every trade is an independent coin flip with no tilt, no correlated losing streaks and no slippage. Shave a little off the win rate and it flips negative.`);
       steps.push(`<strong>Fix the edge anyway.</strong> Breakeven at ${p.R.toFixed(1)}R is a ${fmtPct(beWR)} win rate; aim for <code>${fmtPct(targetWR)}</code>. Or hold ${fmtPct(p.winRate)} wins and push winners to <code>${targetR.toFixed(1)}R</code>.`);
+      steps.push(`<strong>Prove it on 30+ trades</strong> on a paper account first, logged here with the same stops, sizing, commissions and financing. That is what turns a guess about your edge into a measurement.` + paperCTA());
       steps.push(`<strong>Do not read this as a green light.</strong> A strategy that only profits because someone else caps your losses is one rule change away from worthless.`);
     } else if(edge<=0){
       cls='plan-stop'; verdict='Stop — don’t buy an eval';
       headline=`At ${fmtPct(p.winRate)} wins and ${p.R.toFixed(1)}R you lose ${Math.abs(edge).toFixed(2)}R on every trade. No account size, plan or drawdown rule can fix a negative edge.`;
       steps.push(`<strong>Fix the edge first.</strong> Two levers, either one works: lift the win rate to <code>${fmtPct(targetWR)}</code> at your current ${p.R.toFixed(1)}R, or hold ${fmtPct(p.winRate)} wins and push average winners to <code>${targetR.toFixed(1)}R</code>. Breakeven is exactly ${fmtPct(beWR)} / ${isFinite(beR)?beR.toFixed(1)+'R':'—'}; the targets add a cushion for fees and variance.`);
-      steps.push(`<strong>Prove it on 30+ trades</strong> in the Journal before any money goes in. A 10-trade hot run tells you nothing.`);
+      steps.push(`<strong>Prove it on 30+ trades</strong> in the Journal before any money goes in — on a paper account, logged here exactly as you would log a live one: same stops, same sizing, same commissions and financing. A 10-trade hot run tells you nothing.` + paperCTA());
       steps.push(`<strong>If winners keep getting cut short</strong>, that's an R problem, not a win-rate problem — it's usually the faster of the two to fix.`);
       steps.push(`<strong>Cost of ignoring this:</strong> at ${fmt$(p.cost)} a go you'd expect to lose roughly <code>${fmt$(Math.abs(main.ev))}</code> per eval bought — and only ${fmtPct(main.beatProb)} of attempts return more than the fee.`);
     } else if(main.ev<=0){
@@ -3401,6 +3445,10 @@
   $('cFill').addEventListener('change',()=>{
     if($('cEnteredAt')) $('cEnteredAt').value = fillStyle().entry;   // follow the plan until overridden
     renderChecker(); debounced();
+  });
+
+  $('planSteps').addEventListener('click', e=>{
+    if(e.target.closest('[data-paper]')) openPaperAccount();
   });
 
   $('cAcctSel').addEventListener('change',()=>{
