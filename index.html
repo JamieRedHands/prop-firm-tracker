@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="b169187 · 3 Sept 2026, 08:41">
+<meta name="build" content="f004ed9 · 3 Sept 2026, 08:56">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}html[data-theme="light"]{color-scheme:light}html[data-theme="light"] body{background:#f4f6f8}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -277,6 +277,32 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     font-family:"IBM Plex Mono",monospace; letter-spacing:.06em; cursor:pointer; user-select:none}
   .papersw input{margin:0; accent-color:var(--accent); cursor:pointer}
   .acctrow .papersw:hover{color:var(--ink)}
+  /* the reasoning lives beside the control it explains, and stays out of the way until asked for */
+  .whywrap{position:relative; margin-top:8px}
+  .infochip{width:100%; display:flex; align-items:center; gap:7px; text-align:left; background:var(--inset);
+    border:1px solid var(--border); border-radius:8px; padding:7px 9px; font:inherit; font-size:11.5px;
+    color:var(--sub); cursor:pointer}
+  .infochip:hover, .infochip:focus-visible{border-color:var(--accent); color:var(--ink)}
+  .infochip .ic{flex:none; width:15px; height:15px; border-radius:50%; border:1px solid var(--muted);
+    font-family:"IBM Plex Mono",monospace; font-size:10px; line-height:13px; text-align:center}
+  .whypop{position:absolute; z-index:30; left:0; top:calc(100% + 6px); width:min(340px,92vw);
+    background:var(--surface); border:1px solid var(--border); border-radius:9px; padding:10px 12px;
+    box-shadow:0 10px 26px rgba(0,0,0,.35); font-size:11.5px; line-height:1.45; color:var(--sub);
+    opacity:0; visibility:hidden; transition:opacity .12s}
+  .whywrap:hover .whypop, .whywrap:focus-within .whypop{opacity:1; visibility:visible}
+  .whypop p{margin:0 0 7px}
+  .whypop .fine{color:var(--muted); font-size:10.5px}
+  /* the table itself: one line until you want it */
+  .whycard summary{cursor:pointer; font-size:14px; font-weight:600; color:var(--ink); list-style:none;
+    display:flex; align-items:center; justify-content:space-between; gap:12px}
+  .whycard summary::-webkit-details-marker{display:none}
+  .whycard summary .more{font-size:11px; font-weight:500; color:var(--muted);
+    font-family:"IBM Plex Mono",monospace}
+  .whycard summary:hover .more{color:var(--accent)}
+  .whycard[open] summary .more{color:var(--accent)}
+  .whycard[open] summary{margin-bottom:10px}
+  .whycard[open] summary .more::after{content:' ▴'}
+  .whycard summary .more::after{content:' ▾'}
   .verdictBox{border-radius:10px; padding:16px 18px; border:1px solid var(--border); background:var(--inset); margin-bottom:14px}
   .verdictBox.clear{border-color:var(--good); background:rgba(34,180,85,.10)}
   .verdictBox.caution{border-color:var(--warn); background:rgba(224,163,46,.10)}
@@ -490,18 +516,23 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
 
   <!-- ================= DASHBOARD ================= -->
   <div id="view-dash" role="tabpanel" aria-labelledby="tab-dash">
-  <div class="ctxbar" id="dContext" style="margin-bottom:14px">—</div>
   <div class="results">
+      <div class="card" id="dSumCard">
+        <h3>Where you stand</h3>
+        <p class="sub" id="dSumSub">—</p>
+        <div class="tiles" id="dSum"></div>
+      </div>
+
       <div class="card" id="dHoldCard" hidden>
         <h3>Accounts you hold<span class="badge" id="dHoldCount"></span></h3>
-        <p class="sub">Everything open right now, and how far each one is through its target. Read only —
+        <p class="sub">Every account you hold and how far each one is through its target. Read only —
           open, switch and close accounts under My accounts on the Pre-Trade Check.</p>
         <div class="holds" id="dHold"></div>
       </div>
 
       <div class="card" id="dLiveCard" hidden>
         <h3>Live positions<span class="badge" id="dLiveCount"></span></h3>
-        <p class="sub">Type the price now and every open trade is marked to it — P/L, R, and how far it has
+        <p class="sub">Every open trade, on every account. Type the price now and each one is marked to it — P/L, R, and how far it has
           travelled between your stop and target. Reach either level and it asks you to settle with the actual
           fill, then prices the commissions, financing and slippage from that instead of assuming a clean fill.</p>
         <div class="feedbar" id="feedBar"></div>
@@ -514,20 +545,6 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       
       
       
-      <div class="card">
-        <h3>Payouts per funded account</h3>
-        <p class="sub" id="payoutSub">—</p>
-        <div class="tile"><div class="k">Avg payout per funded acct</div><div class="v" id="avgPayout">—</div><div class="s" id="avgCycles">—</div></div>
-        <div class="dist" id="dist"></div>
-      </div>
-
-      <div class="card chartbox">
-        <h3>Expectancy vs. win rate</h3>
-        <p class="sub">Expected $ per eval as your per-trade win rate moves, holding everything else fixed. The dot is you.</p>
-        <div style="overflow-x:auto"><svg id="chart" width="100%" height="260" viewBox="0 0 760 260" preserveAspectRatio="none" aria-label="Line chart of expected profit per eval versus win rate"></svg></div>
-        <div class="tip" id="tip"></div>
-      </div>
-
       
       
       <footer>
@@ -686,6 +703,20 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       </div>
 
       <div class="card">
+        <h3>Payouts per funded account</h3>
+        <p class="sub" id="payoutSub">—</p>
+        <div class="tile"><div class="k">Avg payout per funded acct</div><div class="v" id="avgPayout">—</div><div class="s" id="avgCycles">—</div></div>
+        <div class="dist" id="dist"></div>
+      </div>
+
+      <div class="card chartbox">
+        <h3>Expectancy vs. win rate</h3>
+        <p class="sub">Expected $ per eval as your per-trade win rate moves, holding everything else fixed. The dot is you.</p>
+        <div style="overflow-x:auto"><svg id="chart" width="100%" height="260" viewBox="0 0 760 260" preserveAspectRatio="none" aria-label="Line chart of expected profit per eval versus win rate"></svg></div>
+        <div class="tip" id="tip"></div>
+      </div>
+
+      <div class="card">
         <h3>Buy this one</h3>
         <p class="sub" id="recSub">—</p>
         <div class="recpick" id="recPick">
@@ -750,6 +781,18 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
           <input type="number" id="cRisk" min="0" step="1" value="250">
         </div>
         <div class="hint" id="cStratHint"></div>
+        <div class="whywrap" id="cWhyWrap" hidden>
+          <button type="button" class="infochip" id="cWhyBtn" aria-controls="cBufferCard">
+            <span class="ic" aria-hidden="true">i</span>Why this can't breach your daily limit
+          </button>
+          <div class="whypop" role="tooltip">
+            <p>Each trade is sized so that losing it costs a fixed slice of today's allowance —
+              commissions and financing included — so the whole day's worth of stops still lands
+              inside the limit, with the rest held back to absorb a bad fill.</p>
+            <p id="cWhySub">—</p>
+            <span class="fine">Click for the trade-by-trade numbers.</span>
+          </div>
+        </div>
       </div>
 
       <div class="panel">
@@ -881,21 +924,21 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         <div class="tile"><div class="k">Total cost</div><div class="v" id="cFees">—</div><div class="s" id="cFeesSub">—</div></div>
       </div>
 
-      <div class="card" id="cBufferCard">
-        <h3>Why this can't breach your daily limit</h3>
+      <div class="card">
+        <h3>Rule checks</h3>
+        <p class="sub">Against Breakout's live rules for your plan, symbol limits, and your own trading stats.</p>
+        <ul class="checks" id="cChecks"></ul>
+      </div>
+
+      <details class="card whycard" id="cBufferCard">
+        <summary>Why this can't breach your daily limit<span class="more">show the numbers</span></summary>
         <p class="sub" id="cBufferSub">—</p>
         <div style="overflow-x:auto"><table id="cBuffer">
           <thead><tr><th>If you keep losing</th><th>Risk that trade</th><th>Equity after</th><th>Room left</th></tr></thead>
           <tbody></tbody>
         </table></div>
         <div class="hint" id="cBufferNote"></div>
-      </div>
-
-      <div class="card">
-        <h3>Rule checks</h3>
-        <p class="sub">Against Breakout's live rules for your plan, symbol limits, and your own trading stats.</p>
-        <ul class="checks" id="cChecks"></ul>
-      </div>
+      </details>
 
       <div class="card">
         <h3>Cost breakdown</h3>
@@ -1295,7 +1338,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       $('acctList').querySelectorAll('[data-pick]').forEach(b=>b.addEventListener('click',()=>{
         activeAcctId=+b.dataset.pick;
         saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
-        renderJournal(); renderJournalStats(); renderLive(); renderDashContext(); debounced();
+        renderJournal(); renderJournalStats(); renderLive(); debounced();
       }));
       $('acctList').querySelectorAll('[data-paper-acct]').forEach(box=>box.addEventListener('change',()=>{
         const a=acctById(+box.dataset.paperAcct); if(!a) return;
@@ -1305,7 +1348,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         for(const t of journal) if(jAcct(t)===a.id && !!t.paper !== a.paper){ t.paper=a.paper; touched++; }
         saveAccounts(); if(touched) saveJournal();
         renderAccounts(); renderChecker(); renderJournal(); renderJournalStats(); renderLive();
-        renderDashContext(); debounced();
+        debounced();
       }));
       $('acctList').querySelectorAll('[data-firm]').forEach(sel=>sel.addEventListener('change',()=>{
         const a=acctById(+sel.dataset.firm);
@@ -1338,7 +1381,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
           ? 'Switch accounts here or in My accounts — the limits below follow it. '+
             fmt$(actG.made)+' of '+fmt$(actG.need)+' '+actG.what+'.'
           : 'Switch accounts here or in My accounts — the limits below follow it.';
-    renderHoldings();
+    renderDash();
   }
 
   function paperCTA(){
@@ -2401,7 +2444,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     g+=`<path d="${pts.map((p,i)=>(i?'L':'M')+X(p.i).toFixed(1)+' '+Y(p.v).toFixed(1)).join(' ')}" fill="none" stroke="${cum>=0?'var(--good)':'var(--bad)'}" stroke-width="2" stroke-linejoin="round"/>`;
     g+=`<text x="${(mL+W-mR)/2}" y="${H-6}" text-anchor="middle">${s.n} trades · cumulative R</text>`;
     $('eqChart').innerHTML=g;
-    renderHoldings();          // closing a trade moves an account's progress bar
+    renderDash();          // closing a trade moves an account's progress bar
   }
 
   function applyTracked(){
@@ -2951,19 +2994,6 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
 
   // ---------- sweep chart ----------
   let sweepData=null, chartGeom=null;
-  function acctSimParams(p){
-    const a=activeAccount(); if(!a) return null;
-    const r=planRulesFor(a);
-    const tbl=((FIRMS[acctFirm(a)]||FIRM).fees||{})[a.plan];
-    const row=tbl && tbl[a.size];
-    // a funded account has already been paid for; an eval still owes its fee
-    const fee = (isPaperAcct(a) || a.stage==='funded') ? 0
-              : (row ? row[+$('split').value===90?1:0] : p.cost);
-    return Object.assign({}, p, {acct:a.size, cost:fee,
-      target:(r.target==null?10:r.target)/100,
-      maxDD:(r.maxdd==null?6:r.maxdd)/100,
-      dailyDD:(r.dailydd==null?3:r.dailydd)/100});
-  }
   function renderPayouts(res, p){
     $('avgPayout').textContent = fmt$(res.avgPaid*p.acct);
     $('avgCycles').textContent = 'median '+res.medCycles+' payout'+(res.medCycles===1?'':'s')+' · mean '+res.avgCycles.toFixed(1);
@@ -2980,7 +3010,69 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
              `<span class="cap">${labels[i]} payout${labels[i]==='1'?'':'s'}</span></div>`;
     }).join('');
   }
-  // says out loud whose rules the panels below are running on
+  // The Dashboard answers "what is going on", across every account at once. Nothing here is scoped
+  // to the selected account — that belongs to the Pre-Trade Check, which is about one trade.
+  function renderDash(){ renderOverview(); renderHoldings(); }
+
+  function renderOverview(){
+    const box=$('dSum'); if(!box) return;
+    const closed = journal.filter(t=>t.status!=='open');
+    const open   = journal.filter(t=>t.status==='open');
+    if(!accounts.length && !journal.length){
+      $('dSumSub').textContent = 'Nothing tracked yet.';
+      box.innerHTML = '<div class="hint" style="margin:0; grid-column:1 / -1">Open an account under '+
+        'My accounts on the Pre-Trade Check, then log a trade. Everything you hold and every open '+
+        'position shows up here.</div>';
+      return;
+    }
+    const paperAcct = a => isPaperAcct(a);
+    const live=accounts.filter(a=>!paperAcct(a)), paper=accounts.filter(paperAcct);
+    const funded=accounts.filter(a=>a.stage==='funded').length;
+    const sum = (xs,f) => xs.reduce((x,v)=>x+f(v),0);
+
+    // a trade is paper if its account is; trades filed under a closed account keep their own stamp
+    const isPaperTrade = t => { const a=acctById(jAcct(t)); return a ? paperAcct(a) : !!t.paper; };
+    const liveClosed=closed.filter(t=>!isPaperTrade(t)), paperClosed=closed.filter(isPaperTrade);
+    const net   = xs => sum(xs,t=>+t.pl||0);
+    const gross = xs => sum(xs,t=>grossPL(t));
+    const costs = xs => sum(xs,t=>+t.fees||0);
+
+    const rec = xs => {
+      if(!xs.length) return null;
+      const wins=xs.filter(t=>grossPL(t)>0).length;
+      const rs=xs.filter(t=>+t.risk>0).map(grossR);
+      const avg=rs.length ? rs.reduce((a,b)=>a+b,0)/rs.length : 0;
+      return {n:xs.length, wr:wins/xs.length, avg};
+    };
+    const r = rec(closed);
+    const openRisk = sum(open,t=>+t.risk||0);
+    const openAccts = new Set(open.map(jAcct)).size;
+
+    const tiles=[
+      {k:'Accounts open', v:String(accounts.length),
+       s:(accounts.length-funded)+' eval · '+funded+' funded'+(paper.length?' · '+paper.length+' on paper':'')},
+      {k:'Capital being traded', v:fmt$(sum(live,a=>a.size)),
+       s:paper.length ? 'plus '+fmt$(sum(paper,a=>a.size))+' on paper'
+                      : (live.length?'across '+live.length+' account'+(live.length===1?'':'s'):'no live accounts')},
+      {k:'Realised P/L', v:fmt$2(net(liveClosed)), cls:net(liveClosed)>=0?'pos':'neg',
+       s:liveClosed.length ? fmt$2(gross(liveClosed))+' gross less '+fmt$2(costs(liveClosed))+' in costs'
+                           : 'no closed trades on a live account'},
+    ];
+    if(paperClosed.length) tiles.push({k:'Realised on paper', v:fmt$2(net(paperClosed)),
+       cls:net(paperClosed)>=0?'pos':'neg', s:paperClosed.length+' closed · nothing at stake'});
+    tiles.push({k:'At risk right now', v:openRisk>0?fmt$(openRisk):'—',
+       s:open.length ? open.length+' open across '+openAccts+' account'+(openAccts===1?'':'s')
+                     : 'nothing open'});
+    tiles.push({k:'Your record', v:r?fmtPct(r.wr,0):'—',
+       cls:r?(r.avg>=0?'pos':'neg'):'', s:r ? r.n+' closed · '+(r.avg>=0?'+':'')+r.avg.toFixed(2)+'R avg, gross'
+                                            : 'no closed trades yet'});
+
+    box.innerHTML = tiles.map(t=>'<div class="tile"><div class="k">'+t.k+'</div>'+
+      '<div class="v '+(t.cls||'')+'">'+t.v+'</div><div class="s">'+t.s+'</div></div>').join('');
+    $('dSumSub').textContent = 'Every account and every open trade together — not the one you have '+
+      'selected for the Pre-Trade Check. Paper is kept apart from the money.';
+  }
+
   // The same accounts as My accounts, with nothing to press — the Dashboard reports, it does not edit.
   function renderHoldings(){
     const card=$('dHoldCard'), box=$('dHold'); if(!card||!box) return;
@@ -3000,26 +3092,9 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
           ? '<span class="acctgoal">passed '+esc(tzDateTime(Date.parse(a.passedAt||Date.now())))+
             ' · funded account opened</span>'
           : goalLine(g))+
-        (a.id===activeAcctId ? '<span class="inuse">SELECTED</span>' : '')+
+        (a.id===activeAcctId ? '<span class="inuse">IN THE PRE-TRADE CHECK</span>' : '')+
       '</div>';
     }).join('');
-  }
-
-  function renderDashContext(){
-    const el=$('dContext'); if(!el) return;
-    const a=activeAccount();
-    if(!a){
-      el.innerHTML = 'No account selected — these run on the <strong>'+
-        esc($('plan').options[$('plan').selectedIndex].text)+' '+fmt$(+$('acct').value)+
-        '</strong> plan set on New Eval. Open an account there and pick it in the Pre-Trade Check.';
-      return;
-    }
-    const r=planRulesFor(a);
-    el.innerHTML = (isPaperAcct(a) ? '<span class="paperbadge">PAPER</span> ' : '')+
-      '<strong>'+esc(a.label)+'</strong> — '+(acctFirmName(a)?esc(acctFirmName(a))+' · ':'')+
-      (a.stage==='funded'?'funded':'evaluation')+' · '+fmt$(a.size)+' · '+
-      r.dailydd+'% daily loss, '+r.maxdd+'% static max drawdown. '+
-      'Everything below runs on this account — switch it in the Pre-Trade Check.';
   }
 
   function renderChart(points, cur){
@@ -3326,11 +3401,12 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const bcard=$('cBufferCard');
     if(sr.mode==='budget'){
       const b=budgetPlan(st);
-      bcard.hidden=false;
+      bcard.hidden=false; $('cWhyWrap').hidden=false;
       $('cBufferSub').textContent =
         `${(b.usePct*100).toFixed(0)}% of the ${fmt$(b.allowance)} allowance is yours to spend: ${fmt$2(b.perTrade)} per trade across ${b.n}. `+
         `Each of those already includes both commissions and the financing, so a stop at your price costs exactly ${fmt$2(cleanLoss)} — `+
         `${(b.perTrade/st.dayStart*100).toFixed(2)}% of balance. The ${fmt$2(b.allowance-b.usable)} you held back is what absorbs a bad fill.`;
+      $('cWhySub').textContent = $('cBufferSub').textContent;   // the hover says the same thing
       // every row starts from what the day has actually cost so far, not a clean slate
       let rows=[];
       if(b.spent>0) rows.push(`<tr><td>Already lost today</td><td>${fmt$2(b.spent)}</td>`+
@@ -3361,7 +3437,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       $('cBufferNote').textContent = spare>0
         ? `Every remaining trade losing at its stop costs ${fmt$2(b.worstCase)} of the ${fmt$(b.allowance)} limit, leaving ${fmt$2(spare)} (${((spare/b.allowance)*100).toFixed(0)}%) as the slippage buffer. That buffer absorbs fills up to ${breakBps.toFixed(0)} bps past your stops — ${(breakBps/Math.max(bps,1)).toFixed(1)}× the ${bps} bps expected in these conditions. Stick to ${b.n} trades and never widen a stop.`
         : `Warning: the remaining trades would breach at their stops alone. Lower the percentage of the limit you use or cut the trades per day.`;
-    } else { bcard.hidden=true; }
+    } else { bcard.hidden=true; $('cWhyWrap').hidden=true; }
 
     // day budget slots
     if(sr.mode==='budget'){
@@ -3503,9 +3579,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       if(token!==runToken) return;
       const main=fullSim(p,4000,12345,true);
       renderMain(main,p);
-      const pa = acctSimParams(p);                 // null when no account is selected
-      renderPayouts(pa ? fullSim(pa,4000,12345,true) : main, pa||p);
-      renderDashContext();
+      renderPayouts(main, p);
       $('busy').textContent='sweeping win rates…';
       const w0=+$('winRate').value;
       const lo=Math.max(5,w0-10), hi=Math.min(95,w0+10);
@@ -3515,7 +3589,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         const t0=performance.now();
         while(i<=steps && performance.now()-t0<40){
           const w=lo+(hi-lo)*i/steps;
-          pts.push({w, ev: fullSim(Object.assign({},pa||p,{winRate:w/100}),700,999,false).ev});
+          pts.push({w, ev: fullSim(Object.assign({},p,{winRate:w/100}),700,999,false).ev});
           i++;
         }
         if(i<=steps){ setTimeout(step,0); return; }
@@ -3623,6 +3697,12 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     debounced();
   });
   $('cStrat').addEventListener('change',updateStrat);
+  // the chip explains on hover; pressing it opens the working underneath and takes you to it
+  $('cWhyBtn').addEventListener('click',()=>{
+    const d=$('cBufferCard'); if(!d) return;
+    d.open=true;
+    if(d.scrollIntoView) d.scrollIntoView({block:'center', behavior:'smooth'});
+  });
   ['cMaxTrades','cUsePct'].forEach(id=>$(id).addEventListener('input',renderChecker));
   $('cCond').addEventListener('change',renderChecker);
   $('cFill').addEventListener('change',()=>{
@@ -3638,7 +3718,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const v=$('cAcctSel').value;
     activeAcctId = v===''? null : +v;
     saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
-    renderJournal(); renderJournalStats(); renderLive(); renderDashContext(); debounced();
+    renderJournal(); renderJournalStats(); renderLive(); debounced();
   });
   // remember the day-start balance against the selected account
   $('cDayStart').addEventListener('change',()=>{
