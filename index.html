@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="bf4346a · 2 Sept 2026, 15:05">
+<meta name="build" content="f9d6a8c · 2 Sept 2026, 15:17">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}html[data-theme="light"]{color-scheme:light}html[data-theme="light"] body{background:#f4f6f8}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -567,6 +567,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
             <select id="acct"></select>
           </div>
         </div>
+        <label class="toggle" style="margin:-4px 0 12px"><input type="checkbox" id="paperMode">Paper account — same rules, no fee</label>
         <div class="field" id="splitField">
           <label><span class="lbl">Profit split</span></label>
           <select id="split"></select>
@@ -962,7 +963,8 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   "use strict";
   const $ = id => document.getElementById(id);
 
-  const isPaper = k => k==='paper';
+  const paperOn = () => !!($('paperMode') && $('paperMode').checked);
+  const isPaperAcct = a => !!a && (a.paper===true || a.plan==='paper');   // 'paper' plans are pre-toggle saves
 
   // ================= maker vs taker =================
   // A resting limit order is a maker fill; anything that crosses the book is a taker fill.
@@ -1195,6 +1197,9 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       let dirty=false;
       accounts.forEach(a=>{
         if(!a.stage){ a.stage='eval'; dirty=true; }
+        // 'paper' used to be a plan; its rules were Classic's, so that is what it was rehearsing
+        if(a.plan==='paper'){ a.plan='classic'; a.paper=true; dirty=true; }
+        if(a.paper===undefined){ a.paper=false; dirty=true; }
         if(a.firm===undefined){ a.firm=null; dirty=true; }
       });
       if(dirty) saveAccounts();
@@ -1211,11 +1216,12 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const a=activeAccount();
     if(a){
       const r = PLANS[a.plan] || {target:+$('target').value, maxdd:+$('maxdd').value, dailydd:+$('dailydd').value};
-      return {label:a.label, plan:a.plan, planName:isPaper(a.plan)?'Paper':cap(a.plan), size:a.size,
+      return {label:a.label, plan:a.plan, planName:cap(a.plan), size:a.size, paper:isPaperAcct(a),
               target:r.target/100, maxDD:r.maxdd/100, dailyDD:r.dailydd/100, bal:a.bal,
               stage:a.stage||'eval'};
     }
-    return {label:null, plan:$('plan').value, planName:$('plan').options[$('plan').selectedIndex].text,
+    return {label:null, plan:$('plan').value, paper:paperOn(),
+            planName:$('plan').options[$('plan').selectedIndex].text,
             size:+$('acct').value, target:+$('target').value/100,
             maxDD:+$('maxdd').value/100, dailyDD:+$('dailydd').value/100, bal:+$('acct').value};
   }
@@ -1233,7 +1239,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         return `
         <div class="acctrow ${a.id===activeAcctId?'cur':''} ${a.stage==='funded'?'funded':''} ${ready?'hit':''}">
           <button class="pick" data-pick="${a.id}" title="Use this account for the Pre-Trade Check">
-            <b>${esc(a.label)}${chip}</b><span>${acctFirmName(a) ? esc(acctFirmName(a))+' · ' : ''}${isPaper(a.plan)?'Paper':cap(a.plan)} · ${fmt$(a.size)} · bal ${fmt$(a.bal)}</span>
+            <b>${esc(a.label)}${chip}</b><span>${acctFirmName(a) ? esc(acctFirmName(a))+' · ' : ''}${isPaperAcct(a)?'Paper ':''}${cap(a.plan)} · ${fmt$(a.size)} · bal ${fmt$(a.bal)}</span>
             ${a.fundedId ? '<span class="acctgoal">passed '+esc(tzDateTime(Date.parse(a.passedAt||Date.now())))+' · funded account opened</span>' : goalLine(g)}
           </button>
           ${acctFirm(a) ? '' : `<select class="firmsel" data-firm="${a.id}" title="Which firm is this account with?">
@@ -1266,7 +1272,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     // checker dropdown
     const sel=$('cAcctSel');
     sel.innerHTML = accounts.length
-      ? accounts.map(a=>`<option value="${a.id}">${esc(a.label)} — ${acctFirmName(a) ? esc(acctFirmName(a))+' ' : ''}${isPaper(a.plan)?'Paper':cap(a.plan)} ${fmt$(a.size)}${a.stage==='funded'?' funded':''}</option>`).join('')
+      ? accounts.map(a=>`<option value="${a.id}">${esc(a.label)} — ${acctFirmName(a) ? esc(acctFirmName(a))+' ' : ''}${isPaperAcct(a)?'Paper ':''}${cap(a.plan)} ${fmt$(a.size)}${a.stage==='funded'?' funded':''}</option>`).join('')
       : '<option value="">Using the New Eval settings</option>';
     if(accounts.length && activeAcctId!=null) sel.value=String(activeAcctId);
     const act=activeAccount(), actG=act?acctGoal(act):null;
@@ -1281,7 +1287,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   }
 
   function paperCTA(){
-    const have = accounts.find(a=>isPaper(a.plan));
+    const have = accounts.find(a=>isPaperAcct(a));
     return have
       ? ' <span class="papernote">Log them to <b>'+esc(have.label)+'</b> — pick it in the Pre-Trade Check, then Log this trade to journal.</span>'
       : '<button class="btn paperbtn" type="button" data-paper="1">Open a $10,000 paper account</button>';
@@ -1289,12 +1295,13 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   // Same rules, commissions and financing as a bought account. The size is arbitrary — it is the
   // R multiples and the win rate you are measuring, and those do not care about the balance.
   function openPaperAccount(){
-    const have = accounts.find(a=>isPaper(a.plan));
+    const have = accounts.find(a=>isPaperAcct(a));
     if(have) activeAcctId = have.id;
     else {
-      const size=10000;
-      const a={id:Date.now(), label:'Paper '+fmt$(size), plan:'paper', size, bal:size,
-               stage:'eval', firm:FIRM_KEY};
+      const plan=$('plan').value, tbl=FEES[plan]||{};
+      const size = tbl[10000] ? 10000 : (Object.keys(tbl).map(Number).sort((x,y)=>x-y)[0] || 10000);
+      const a={id:Date.now(), label:'Paper '+cap(plan)+' '+fmt$(size), plan, size, bal:size,
+               stage:'eval', paper:true, firm:FIRM_KEY};
       accounts.push(a); activeAcctId=a.id;
     }
     saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
@@ -1305,8 +1312,9 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
 
   function promoteToFunded(a){
     const k=accounts.filter(x=>x.stage==='funded' && x.plan===a.plan && x.size===a.size).length;
-    const f={id:Date.now(), label:(isPaper(a.plan)?'Paper':cap(a.plan))+' '+fmt$(a.size)+' funded'+(k?' #'+(k+1):''),
-             plan:a.plan, size:a.size, bal:a.size, stage:'funded', firm:a.firm||null, fromId:a.id};
+    const f={id:Date.now(), label:(isPaperAcct(a)?'Paper ':'')+cap(a.plan)+' '+fmt$(a.size)+' funded'+(k?' #'+(k+1):''),
+             plan:a.plan, size:a.size, bal:a.size, stage:'funded', paper:isPaperAcct(a),
+             firm:a.firm||null, fromId:a.id};
     a.passedAt=new Date().toISOString(); a.fundedId=f.id;
     accounts.push(f); activeAcctId=f.id;
     saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
@@ -1322,8 +1330,8 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   $('acctAdd').addEventListener('click',()=>{
     const plan=$('plan').value, size=+$('acct').value;
     const n=accounts.filter(a=>a.plan===plan && a.size===size).length;
-    const label=(isPaper(plan)?'Paper':cap(plan))+' '+fmt$(size)+(n?' #'+(n+1):'');
-    const a={id:Date.now(), label, plan, size, bal:size, stage:'eval', firm:FIRM_KEY};
+    const label=(paperOn()?'Paper ':'')+cap(plan)+' '+fmt$(size)+(n?' #'+(n+1):'');
+    const a={id:Date.now(), label, plan, size, bal:size, stage:'eval', paper:paperOn(), firm:FIRM_KEY};
     accounts.push(a); activeAcctId=a.id;
     saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
     renderJournal(); renderJournalStats(); renderLive();
@@ -1409,7 +1417,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     if(!a) return id===null ? 'Dashboard settings' : 'account no longer open';
     const r=PLANS[a.plan]||{};
     return (acctFirmName(a) ? acctFirmName(a)+' · ' : '')+
-           (isPaper(a.plan)?'Paper':cap(a.plan))+' '+fmt$(a.size)+' '+(a.stage==='funded'?'funded':'eval')+
+           (isPaperAcct(a)?'Paper ':'')+cap(a.plan)+' '+fmt$(a.size)+' '+(a.stage==='funded'?'funded':'eval')+
            ' · '+r.dailydd+'% daily / '+r.maxdd+'% max DD';
   }
   // The Journal tab's own view filter. It never touches the Pre-Trade Check, which always
@@ -2579,9 +2587,9 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const sel = $('plan').value;
 
     // A paper account buys nothing, so there is no bankroll to ladder.
-    if(isPaper(sel)){
-      $('ladderPlan').innerHTML = `Paper account <em>· no fees, nothing to stake</em>`;
-      $('ladderSub').textContent = 'Paper trading costs nothing, so there is no ladder to climb. Log trades against it until your journal shows a real edge, then switch the plan above to see which account your bankroll can fund.';
+    if(paperOn()){
+      $('ladderPlan').innerHTML = `Paper ${esc(cap(sel))} <em>· no fees, nothing to stake</em>`;
+      $('ladderSub').textContent = 'Paper trading costs nothing, so there is no ladder to climb. Log trades against it on the same rules until your journal shows a real edge, then turn the paper switch off to see which account your bankroll can fund.';
       $('ladder').innerHTML='';
       const st2=journalStats();
       $('ladderSteps').innerHTML = st2
@@ -2592,7 +2600,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
 
     const planK = PLANS[sel] && cmp[sel] ? sel : 'classic';
     const pass = cmp[planK].passProb;
-    const heldPaper = (accounts||[]).some(x=>isPaper(x.plan));
+    const heldPaper = (accounts||[]).some(x=>isPaperAcct(x));
 
     // Every rung's requirement depends only on the plan's fee and pass rate — never the bankroll.
     const rungs = SIZES.filter(sz=>FEES[planK][sz]).map(sz=>{
@@ -2659,7 +2667,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   // ================= dashboard render =================
   function renderMain(res, p){
     const edge = p.winRate*p.R - (1-p.winRate);
-    $('evLabel').textContent = isPaper($('plan').value)
+    $('evLabel').textContent = paperOn()
       ? 'Expected payout per attempt (paper — no fee)'
       : 'Expected profit per eval purchased';
     const evEl = $('evPerEval');
@@ -2866,7 +2874,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       bits.push('<li>This is the largest account your bankroll safely supports at any firm — going bigger adds ruin risk faster than it adds profit.</li>');
     }
 
-    if(isPaper($('plan').value)){
+    if(paperOn()){
       bits.push('<li>You are on the paper account, so nothing is being spent. This is the challenge to buy once the journal shows the edge is real.</li>');
     }
     if(pick.firm!==FIRM_KEY){
@@ -2884,7 +2892,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const tbl=((FIRMS[acctFirm(a)]||FIRM).fees||{})[a.plan];
     const row=tbl && tbl[a.size];
     // a funded account has already been paid for; an eval still owes its fee
-    const fee = (isPaper(a.plan) || a.stage==='funded') ? 0
+    const fee = (isPaperAcct(a) || a.stage==='funded') ? 0
               : (row ? row[+$('split').value===90?1:0] : p.cost);
     return Object.assign({}, p, {acct:a.size, cost:fee,
       target:(r.target==null?10:r.target)/100,
@@ -2918,7 +2926,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       return;
     }
     const r=planRulesFor(a);
-    el.innerHTML = (isPaper(a.plan) ? '<span class="paperbadge">PAPER</span> ' : '')+
+    el.innerHTML = (isPaperAcct(a) ? '<span class="paperbadge">PAPER</span> ' : '')+
       '<strong>'+esc(a.label)+'</strong> — '+(acctFirmName(a)?esc(acctFirmName(a))+' · ':'')+
       (a.stage==='funded'?'funded':'evaluation')+' · '+fmt$(a.size)+' · '+
       r.dailydd+'% daily loss, '+r.maxdd+'% static max drawdown. '+
@@ -3088,7 +3096,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const sr=strategyRisk(st);
     let risk=sr.risk;
 
-    const paperNow = isPaper(st.rules.plan);
+    const paperNow = !!st.rules.paper;
     $('cContext').innerHTML =
       (paperNow ? `<span class="paperbadge">PAPER</span> ` : '')+
       `<strong>${esc(st.rules.label || st.rules.planName+' · '+fmt$(p.acct))}</strong> — `+
@@ -3558,7 +3566,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       acctId:(a?a.id:null),                     // the account this trade's limits belong to
       sym:lastPlanned.sym, dir:lastPlanned.dir, risk:Math.round(lastPlanned.risk*100)/100,
       pl:0, acct:(a?a.size:+$('acct').value), acctLabel:(a?a.label:null), status:'open',
-      paper: isPaper(a ? a.plan : $('plan').value), plat:$('cPlat').value, firm:FIRM_KEY,
+      paper: a ? isPaperAcct(a) : paperOn(), plat:$('cPlat').value, firm:FIRM_KEY,
       fill: fillKeyFor($('cEnteredAt').value, fillStyle().target),
       entry:lastPlanned.entry, stop:lastPlanned.stop, target:lastPlanned.tgt,
       units:lastPlanned.units, plannedR:lastPlanned.netR, plannedGrossR:lastPlanned.grossRR, plannedFees:lastPlanned.fees,
@@ -3587,8 +3595,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     $('evalPanelTitle').textContent = f.name+' eval';
 
     const planWas=$('plan').value;
-    $('plan').innerHTML = f.planKeys.map(k=>'<option value="'+k+'">'+esc(f.planNames[k]||cap(k))+'</option>').join('')
-                        + '<option value="paper">Paper trading</option>';
+    $('plan').innerHTML = f.planKeys.map(k=>'<option value="'+k+'">'+esc(f.planNames[k]||cap(k))+'</option>').join('');
     keep($('plan'), planWas);
 
     const acctWas=$('acct').value;
@@ -3643,12 +3650,12 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   }
 
   function updateRuleLock(){
-    // paper accounts keep their rules editable so they can mirror whichever plan you're rehearsing
-    const locked = !isPaper($('plan').value);
-    ['target','maxdd','dailydd'].forEach(id=>$(id).disabled=locked);
+    // the rules come from the plan, on paper as much as live — rehearsing softer limits than the
+    // ones you will be held to teaches you nothing
+    ['target','maxdd','dailydd'].forEach(id=>$(id).disabled=true);
   }
   function updateFee(){
-    if(isPaper($('plan').value)){ $('cost').value=0; $('cost').disabled=true; return; }
+    if(paperOn()){ $('cost').value=0; $('cost').disabled=true; return; }
     $('cost').disabled=false;
     const t=FEES[$('plan').value];
     const f=t && t[$('acct').value];
@@ -3671,6 +3678,9 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const v=$('plan').value;
     if(PLANS[v]){ $('target').value=PLANS[v].target; $('maxdd').value=PLANS[v].maxdd; $('dailydd').value=PLANS[v].dailydd; }
     updateRuleLock(); guardSizes(); updateFee(); debouncedWithRisk();
+  });
+  $('paperMode').addEventListener('change',()=>{
+    updateFee(); renderAccounts(); renderChecker(); debouncedWithRisk();
   });
   ['maxdd','dailydd'].forEach(id=>$(id).addEventListener('input',()=>applyAutoRisk()));
   $('autoRisk').addEventListener('change',()=>{
@@ -3718,7 +3728,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const aRec = acctById(aid);
     const d = $('jDate').value||tradingDay();
     journal.push({id:Date.now(), date:d, dateClosed:d, acctId:aid, acctLabel:aRec?aRec.label:null,
-      paper: aRec ? isPaper(aRec.plan) : false,
+      paper: aRec ? isPaperAcct(aRec) : false,
       sym:$('jSym').value.trim().toUpperCase(), dir:$('jDir').value, risk, pl, acct,
       status:'closed', note:$('jNote').value.trim()});
     saveJournal();
@@ -3773,6 +3783,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       const s={}; FIELD_IDS.forEach(id=>s[id]=$(id).value);
       s.useTracked = $('useTracked').checked;
       s.autoRisk = $('autoRisk').checked;
+      s.paperMode = $('paperMode').checked;
       s.firm = FIRM_KEY;
       EXTRA_IDS.forEach(id=>{ if($(id)) s[id]=$(id).value; });
       localStorage.setItem(STORE_KEY, JSON.stringify(s));
@@ -3786,6 +3797,9 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     ['winRate','rr','risk'].forEach(id=>{ $(id+'N').value=$(id).value; showPair(id); });
     $('useTracked').checked = !!s.useTracked;
     $('autoRisk').checked = s.autoRisk!==false;      // derived risk is the default
+    if(s.plan==='paper'){ $('plan').value='classic'; $('paperMode').checked=true; }
+    else $('paperMode').checked = !!s.paperMode;
+    updateFee();
     updateRuleLock(); guardSizes(); updatePayoutMode();
     applyAutoRisk();
     lockTracked($('useTracked').checked);
