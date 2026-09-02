@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="d8c9ea2 · 2 Sept 2026, 09:38">
+<meta name="build" content="1fbe309 · 2 Sept 2026, 10:26">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -229,6 +229,18 @@
   .paperbadge{display:inline-block; background:var(--line); color:#fff; font-family:"IBM Plex Mono",monospace;
     font-size:10px; font-weight:600; letter-spacing:.08em; padding:2px 6px; border-radius:4px; vertical-align:1px}
   .acctrow .pick .paperbadge{margin-left:6px}
+  .acctrow .pick .stagechip{display:inline-block; margin-left:6px; padding:1px 5px; border-radius:4px;
+    font-family:"IBM Plex Mono",monospace; font-size:9.5px; font-weight:700; letter-spacing:.08em;
+    vertical-align:1px; border:1px solid var(--line); color:var(--muted)}
+  .acctrow .pick .stagechip.funded{border-color:var(--good); color:var(--good)}
+  .acctrow .pick .stagechip.passed{border-color:var(--accent); color:var(--accent)}
+  .acctrow .pick .acctgoal{display:block; margin-top:5px}
+  .acctrow .pick .acctgoal .bar{display:block; height:3px; margin-top:3px; border-radius:2px;
+    background:var(--line); overflow:hidden}
+  .acctrow .pick .acctgoal .bar i{display:block; height:100%; background:var(--accent)}
+  .acctrow.funded .pick .acctgoal .bar i{background:var(--good)}
+  .acctrow.hit .pick{border-color:var(--good); background:rgba(34,180,85,.10); color:var(--ink)}
+  .passbtn{width:100%; margin:-2px 0 8px}
   .verdictBox{border-radius:10px; padding:16px 18px; border:1px solid var(--border); background:var(--inset); margin-bottom:14px}
   .verdictBox.clear{border-color:var(--good); background:rgba(34,180,85,.10)}
   .verdictBox.caution{border-color:var(--warn); background:rgba(224,163,46,.10)}
@@ -1130,6 +1142,12 @@
     try{
       const raw=localStorage.getItem(ACCT_KEY);
       if(raw){ const d=JSON.parse(raw); accounts=d.list||[]; activeAcctId=d.active??null; }
+      let dirty=false;
+      accounts.forEach(a=>{
+        if(!a.stage){ a.stage='eval'; dirty=true; }
+        if(a.firm===undefined){ a.firm=null; dirty=true; }
+      });
+      if(dirty) saveAccounts();
     }catch(e){ accounts=[]; activeAcctId=null; }
   }
   function saveAccounts(){
@@ -1144,7 +1162,8 @@
     if(a){
       const r = PLANS[a.plan] || {target:+$('target').value, maxdd:+$('maxdd').value, dailydd:+$('dailydd').value};
       return {label:a.label, plan:a.plan, planName:isPaper(a.plan)?'Paper':cap(a.plan), size:a.size,
-              target:r.target/100, maxDD:r.maxdd/100, dailyDD:r.dailydd/100, bal:a.bal};
+              target:r.target/100, maxDD:r.maxdd/100, dailyDD:r.dailydd/100, bal:a.bal,
+              stage:a.stage||'eval'};
     }
     return {label:null, plan:$('plan').value, planName:$('plan').options[$('plan').selectedIndex].text,
             size:+$('acct').value, target:+$('target').value/100,
@@ -1155,17 +1174,28 @@
     if(!accounts.length){
       $('acctList').innerHTML='<div class="hint" style="margin:0">No accounts open yet. Set the plan and size above, then press Open this account.</div>';
     } else {
-      $('acctList').innerHTML = accounts.map(a=>`
-        <div class="acctrow ${a.id===activeAcctId?'cur':''}">
+      $('acctList').innerHTML = accounts.map(a=>{
+        const g=acctGoal(a);
+        const ready = a.stage==='eval' && g.hit && !a.fundedId;   // target reached, funded not opened yet
+        const chip = a.fundedId ? '<span class="stagechip passed">PASSED</span>'
+                   : a.stage==='funded' ? '<span class="stagechip funded">FUNDED</span>'
+                   : '<span class="stagechip">EVAL</span>';
+        return `
+        <div class="acctrow ${a.id===activeAcctId?'cur':''} ${a.stage==='funded'?'funded':''} ${ready?'hit':''}">
           <button class="pick" data-pick="${a.id}" title="Use this account for the Pre-Trade Check">
-            <b>${esc(a.label)}</b><span>${isPaper(a.plan)?'Paper':cap(a.plan)} · ${fmt$(a.size)} · bal ${fmt$(a.bal)}</span>
+            <b>${esc(a.label)}${chip}</b><span>${isPaper(a.plan)?'Paper':cap(a.plan)} · ${fmt$(a.size)} · bal ${fmt$(a.bal)}</span>
+            ${a.fundedId ? '<span class="acctgoal">passed '+esc(melDateTime(Date.parse(a.passedAt||Date.now())))+' · funded account opened</span>' : goalLine(g)}
           </button>
           <button class="del" data-del="${a.id}" title="Close account" aria-label="Close account">×</button>
-        </div>`).join('');
+        </div>`+(ready ? `<button class="btn win passbtn" data-pass="${a.id}">Passed — open the funded account</button>` : '');
+      }).join('');
       $('acctList').querySelectorAll('[data-pick]').forEach(b=>b.addEventListener('click',()=>{
         activeAcctId=+b.dataset.pick;
         saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
         renderJournal(); renderJournalStats(); renderLive();
+      }));
+      $('acctList').querySelectorAll('[data-pass]').forEach(b=>b.addEventListener('click',()=>{
+        const a=acctById(+b.dataset.pass); if(a) promoteToFunded(a);
       }));
       $('acctList').querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{
         const id=+b.dataset.del;
@@ -1182,9 +1212,25 @@
       ? accounts.map(a=>`<option value="${a.id}">${esc(a.label)} — ${isPaper(a.plan)?'Paper':cap(a.plan)} ${fmt$(a.size)}</option>`).join('')
       : '<option value="">Using Dashboard settings</option>';
     if(accounts.length && activeAcctId!=null) sel.value=String(activeAcctId);
-    $('cAcctHint').textContent = accounts.length
-      ? 'Switch accounts here or on the Dashboard — the limits below follow it.'
-      : 'No accounts open. The checker is using the Dashboard plan and size.';
+    const act=activeAccount(), actG=act?acctGoal(act):null;
+    $('cAcctHint').textContent = !accounts.length
+      ? 'No accounts open. The checker is using the Dashboard plan and size.'
+      : (act && act.stage==='eval' && actG.hit && !act.fundedId)
+        ? 'Target reached on '+act.label+' — open the funded account from the Dashboard.'
+        : (act && actG)
+          ? 'Switch accounts here or on the Dashboard — the limits below follow it. '+
+            fmt$(actG.made)+' of '+fmt$(actG.need)+' '+actG.what+'.'
+          : 'Switch accounts here or on the Dashboard — the limits below follow it.';
+  }
+
+  function promoteToFunded(a){
+    const k=accounts.filter(x=>x.stage==='funded' && x.plan===a.plan && x.size===a.size).length;
+    const f={id:Date.now(), label:(isPaper(a.plan)?'Paper':cap(a.plan))+' '+fmt$(a.size)+' funded'+(k?' #'+(k+1):''),
+             plan:a.plan, size:a.size, bal:a.size, stage:'funded', firm:a.firm||null, fromId:a.id};
+    a.passedAt=new Date().toISOString(); a.fundedId=f.id;
+    accounts.push(f); activeAcctId=f.id;
+    saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
+    renderJournal(); renderJournalStats(); renderLive();
   }
 
   function syncAccountToChecker(){
@@ -1197,7 +1243,7 @@
     const plan=$('plan').value, size=+$('acct').value;
     const n=accounts.filter(a=>a.plan===plan && a.size===size).length;
     const label=(isPaper(plan)?'Paper':cap(plan))+' '+fmt$(size)+(n?' #'+(n+1):'');
-    const a={id:Date.now(), label, plan, size, bal:size};
+    const a={id:Date.now(), label, plan, size, bal:size, stage:'eval', firm:FIRM_KEY};
     accounts.push(a); activeAcctId=a.id;
     saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
     renderJournal(); renderJournalStats(); renderLive();
@@ -1250,11 +1296,32 @@
     if(a) return a.label;
     return (sample && sample.acctLabel) ? sample.acctLabel+' · closed' : 'Closed account';
   }
+  const acctProfit = a => journal.reduce((x,t)=>
+    x + ((jAcct(t)===a.id && t.status!=='open') ? (+t.pl||0) : 0), 0);
+  const planRulesFor = a => (((FIRMS[a.firm]||{}).plans)||PLANS)[a.plan] || PLANS[a.plan] || {};
+  function acctGoal(a){
+    const made = acctProfit(a);
+    if(a.stage==='funded'){
+      const pct = (+$('payoutTrig').value||5)/100;
+      const need = a.size*pct;
+      return {kind:'payout', what:'to your '+(pct*100).toFixed(1)+'% payout', need, made, hit:made>=need};
+    }
+    const tg = planRulesFor(a).target;
+    const need = a.size*((tg==null?10:tg)/100);
+    return {kind:'target', what:'of the '+(tg==null?10:tg)+'% profit target', need, made, hit:made>=need};
+  }
+  const goalLine = g => {
+    const pct  = g.need>0 ? g.made/g.need : 0;
+    const draw = Math.max(0, Math.min(1, pct));
+    return '<span class="acctgoal">'+fmt$(g.made)+' of '+fmt$(g.need)+' '+g.what+
+           ' · '+(pct*100).toFixed(0)+'%<span class="bar"><i style="width:'+(draw*100).toFixed(1)+'%"></i></span></span>';
+  };
   function acctSub(id){
     const a=acctById(id);
     if(!a) return id===null ? 'Dashboard settings' : 'account no longer open';
     const r=PLANS[a.plan]||{};
-    return (isPaper(a.plan)?'Paper':cap(a.plan))+' '+fmt$(a.size)+' · '+r.dailydd+'% daily / '+r.maxdd+'% max DD';
+    return (isPaper(a.plan)?'Paper':cap(a.plan))+' '+fmt$(a.size)+' '+(a.stage==='funded'?'funded':'eval')+
+           ' · '+r.dailydd+'% daily / '+r.maxdd+'% max DD';
   }
   // The Journal tab's own view filter. It never touches the Pre-Trade Check, which always
   // follows whichever account is selected.
@@ -2899,7 +2966,9 @@
       (paperNow ? `<span class="paperbadge">PAPER</span> ` : '')+
       `<strong>${esc(st.rules.label || st.rules.planName+' · '+fmt$(p.acct))}</strong> — `+
       `${st.rules.planName} ${fmt$(p.acct)} · ${(p.dailyDD*100).toFixed(1)}% daily loss, `+
-      `${(p.maxDD*100).toFixed(1)}% static max drawdown, ${(p.target*100).toFixed(1)}% profit target.`+
+      (st.rules.stage==='funded'
+        ? `${(p.maxDD*100).toFixed(1)}% static max drawdown, no profit target — payout at ${(+$('payoutTrig').value||5).toFixed(1)}%.`
+        : `${(p.maxDD*100).toFixed(1)}% static max drawdown, ${(p.target*100).toFixed(1)}% profit target.`)+
       (paperNow ? ' No money at risk — but commissions, financing and every drawdown rule are applied exactly as they would be live.' : '')+
       (st.rules.label ? '' : ' No account selected, so this is using the Dashboard settings.');
 
