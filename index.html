@@ -3,10 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="6aedd84 · 2 Sept 2026, 10:57">
+<meta name="build" content="cdfa703 · 2 Sept 2026, 11:12">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
-<style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}html[data-theme="light"]{color-scheme:light}html[data-theme="light"] body{background:#f4f6f8}img{max-width:100%}[hidden]{display:none!important}</style>
+<script>/* before the first paint, so a light-mode reader never sees a dark flash */
+try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentElement.dataset.theme='light';}catch(e){}</script>
 </head>
 <body>
 <title>Prop Firm Edge</title>
@@ -24,6 +26,29 @@
     --grid:#232b33; --axis:#39434d;
     --tip-bg:#1f2831; --tip-ink:#edf2f6;
     --focus:#7db4f0;
+    --good-soft:rgba(34,180,85,.16); --good-soft-mid:rgba(34,180,85,.18); --good-soft-hi:rgba(34,180,85,.28);
+    --good-edge:rgba(34,180,85,.55); --good-ink:#5fd98a; --good-ink-hi:#7ce3a1;
+    --bad-soft:rgba(230,103,103,.16); --bad-soft-mid:rgba(230,103,103,.22); --bad-soft-hi:rgba(230,103,103,.28);
+    --bad-edge:rgba(230,103,103,.55); --bad-ink:#f08a8a; --bad-ink-hi:#f7a3a3;
+    --border-strong:rgba(255,255,255,.16); --raised-hover:#232d36;
+  }
+  /* Same page on a light ground. Only the palette changes — every rule below reads these. */
+  :root[data-theme="light"]{
+    color-scheme: light;
+    --page:#f4f6f8; --surface:#ffffff; --raised:#eef2f6; --inset:#f7f9fb;
+    --border:rgba(17,25,33,.14); --hairline:rgba(17,25,33,.08);
+    --ink:#101820; --sub:#43505d; --muted:#6b7784;
+    --accent:#b5701a; --accent-ink:#ffffff;
+    --good:#12833f; --bad:#c33a3a; --warn:#9a6a12;
+    --line:#2b6fd0; --seg-daily:#c2521f; --seg-max:#c33a3a;
+    --grid:#e2e8ee; --axis:#aab4bf;
+    --tip-bg:#101820; --tip-ink:#f4f6f8;
+    --focus:#2b6fd0;
+    --good-soft:rgba(18,131,63,.12); --good-soft-mid:rgba(18,131,63,.14); --good-soft-hi:rgba(18,131,63,.20);
+    --good-edge:rgba(18,131,63,.45); --good-ink:#0e6c33; --good-ink-hi:#0a5527;
+    --bad-soft:rgba(195,58,58,.10); --bad-soft-mid:rgba(195,58,58,.14); --bad-soft-hi:rgba(195,58,58,.18);
+    --bad-edge:rgba(195,58,58,.45); --bad-ink:#b33232; --bad-ink-hi:#912626;
+    --border-strong:rgba(17,25,33,.20); --raised-hover:#e3e9ef;
   }
   *{box-sizing:border-box}
   body{
@@ -35,9 +60,14 @@
   header.masthead{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:14px; justify-content:space-between}
   h1{font-family:Archivo,system-ui,sans-serif; font-weight:800; font-size:clamp(21px,3vw,29px);
      letter-spacing:-.01em; margin:0; text-wrap:balance}
+  .hbtns{display:flex; align-items:center; gap:8px}
   #resetBtn{background:none; border:1px solid var(--border); color:var(--sub); border-radius:7px;
             font:inherit; font-size:12.5px; padding:5px 12px; cursor:pointer}
   #resetBtn:hover{color:var(--ink); border-color:var(--muted)}
+  #themeBtn{background:none; border:1px solid var(--border); color:var(--sub); border-radius:7px;
+            padding:5px 8px; cursor:pointer; line-height:0}
+  #themeBtn:hover{color:var(--accent); border-color:var(--muted)}
+  #themeBtn svg{width:15px; height:15px; display:block}
   button:focus-visible{outline:2px solid var(--focus); outline-offset:1px}
 
   .clocknote{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--muted); margin:-6px 0 10px}
@@ -151,7 +181,7 @@
   .budgetbar .slot{flex:1; height:30px; border-radius:6px; border:1px solid var(--border);
     background:var(--inset); display:flex; align-items:center; justify-content:center;
     font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--muted)}
-  .budgetbar .slot.used{background:rgba(230,103,103,.16); border-color:var(--bad); color:var(--ink)}
+  .budgetbar .slot.used{background:var(--bad-soft); border-color:var(--bad); color:var(--ink)}
   .budgetbar .slot.next{background:rgba(240,162,50,.16); border-color:var(--accent); color:var(--ink); font-weight:600}
   .inlinefield{display:flex; align-items:center; gap:10px; margin:2px 0 12px; flex-wrap:wrap}
   .inlinefield label{font-size:12.5px; color:var(--sub)}
@@ -266,20 +296,20 @@
   .btn{background:var(--accent); color:var(--accent-ink); border:none; border-radius:7px; font:inherit;
        font-weight:600; font-size:13px; padding:8px 16px; cursor:pointer}
   .btn:hover{filter:brightness(1.08)}
-  .btn.ghost{background:var(--raised); border:1px solid rgba(255,255,255,.16); color:var(--ink); font-weight:600}
-  .btn.ghost:hover{border-color:var(--muted); background:#232d36}
+  .btn.ghost{background:var(--raised); border:1px solid var(--border-strong); color:var(--ink); font-weight:600}
+  .btn.ghost:hover{border-color:var(--muted); background:var(--raised-hover)}
   /* outcome buttons carry their own meaning — green closes a winner, red closes a loser */
-  .btn.win{background:rgba(34,180,85,.16); border-color:rgba(34,180,85,.55); color:#5fd98a}
-  .btn.win:hover{background:rgba(34,180,85,.28); border-color:var(--good); color:#7ce3a1}
-  .btn.loss{background:rgba(230,103,103,.16); border-color:rgba(230,103,103,.55); color:#f08a8a}
-  .btn.loss:hover{background:rgba(230,103,103,.28); border-color:var(--bad); color:#f7a3a3}
+  .btn.win{background:var(--good-soft); border-color:var(--good-edge); color:var(--good-ink)}
+  .btn.win:hover{background:var(--good-soft-hi); border-color:var(--good); color:var(--good-ink-hi)}
+  .btn.loss{background:var(--bad-soft); border-color:var(--bad-edge); color:var(--bad-ink)}
+  .btn.loss:hover{background:var(--bad-soft-hi); border-color:var(--bad); color:var(--bad-ink-hi)}
   .btn.manual{background:rgba(240,162,50,.14); border-color:rgba(240,162,50,.5); color:var(--accent)}
   .btn.manual:hover{background:rgba(240,162,50,.24); border-color:var(--accent)}
-  .btn.ghost[data-armed]{background:rgba(230,103,103,.22); border-color:var(--bad); color:#f7a3a3}
+  .btn.ghost[data-armed]{background:var(--bad-soft-mid); border-color:var(--bad); color:var(--bad-ink-hi)}
   .btnrow{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
   .del{background:none; border:1px solid transparent; border-radius:6px; color:var(--sub); cursor:pointer;
        font-size:15px; padding:1px 7px; line-height:1.2}
-  .del:hover{color:#f7a3a3; background:rgba(230,103,103,.16); border-color:rgba(230,103,103,.45)}
+  .del:hover{color:var(--bad-ink-hi); background:var(--bad-soft); border-color:var(--bad-edge)}
 
   /* long / short read at a glance */
   .dir{font-family:"IBM Plex Mono",monospace; font-weight:700; letter-spacing:.05em}
@@ -339,7 +369,7 @@
            font-size:12px; color:var(--sub); background:var(--inset); border:1px solid var(--border);
            border-radius:8px; padding:8px 12px; margin-bottom:12px}
   .feedbar .fdot{width:8px; height:8px; border-radius:50%; background:var(--muted); flex:none}
-  .feedbar.on .fdot{background:var(--good); box-shadow:0 0 0 3px rgba(34,180,85,.18); animation:fpulse 2s ease-in-out infinite}
+  .feedbar.on .fdot{background:var(--good); box-shadow:0 0 0 3px var(--good-soft-mid); animation:fpulse 2s ease-in-out infinite}
   .feedbar.off .fdot{background:var(--warn)}
   .feedbar b{color:var(--ink); font-weight:600}
   .feedbar .fsrc{color:var(--muted)}
@@ -352,7 +382,7 @@
   .lchip{font-size:10px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; padding:2px 6px;
          border-radius:4px; vertical-align:2px; margin-left:6px}
   /* not .live — that class belongs to the position row and would style the chip as a box */
-  .lchip.okx{background:rgba(34,180,85,.18); color:#5fd98a}
+  .lchip.okx{background:var(--good-soft-mid); color:var(--good-ink)}
   .lchip.stale{background:rgba(224,163,46,.18); color:var(--warn)}
   .lmini{background:none; border:1px solid var(--border); color:var(--muted); border-radius:5px; font:inherit;
          font-size:10.5px; padding:2px 7px; cursor:pointer; margin-top:6px; display:block}
@@ -366,8 +396,8 @@
   .lchip.pin{background:rgba(240,162,50,.18); color:var(--accent); cursor:pointer; border:none; font-family:inherit}
   .lalert{display:flex; align-items:center; gap:10px; flex-wrap:wrap; border-radius:8px; padding:9px 12px;
           margin:10px 0 0; font-size:12.5px; font-weight:600}
-  .lalert.tgt{background:rgba(34,180,85,.16); border:1px solid var(--good); color:#7ce3a1}
-  .lalert.stp{background:rgba(230,103,103,.16); border:1px solid var(--bad); color:#f7a3a3}
+  .lalert.tgt{background:var(--good-soft); border:1px solid var(--good); color:var(--good-ink-hi)}
+  .lalert.stp{background:var(--bad-soft); border:1px solid var(--bad); color:var(--bad-ink-hi)}
   .lalert{line-height:1.5}
   .lalert b{color:var(--ink)}
   .lalert .btn{padding:4px 11px; font-size:12px; margin-left:auto}
@@ -411,7 +441,10 @@
 <div class="wrap">
   <header class="masthead">
     <h1>Prop Firm Edge</h1>
-    <button id="resetBtn" type="button">Reset to defaults</button>
+    <div class="hbtns">
+      <button id="themeBtn" type="button" title="Switch to light mode" aria-label="Switch to light mode"></button>
+      <button id="resetBtn" type="button">Reset to defaults</button>
+    </div>
   </header>
 
   <div class="clocknote" id="clockNote"></div>
@@ -1186,7 +1219,7 @@
         <div class="acctrow ${a.id===activeAcctId?'cur':''} ${a.stage==='funded'?'funded':''} ${ready?'hit':''}">
           <button class="pick" data-pick="${a.id}" title="Use this account for the Pre-Trade Check">
             <b>${esc(a.label)}${chip}</b><span>${acctFirmName(a) ? esc(acctFirmName(a))+' · ' : ''}${isPaper(a.plan)?'Paper':cap(a.plan)} · ${fmt$(a.size)} · bal ${fmt$(a.bal)}</span>
-            ${a.fundedId ? '<span class="acctgoal">passed '+esc(melDateTime(Date.parse(a.passedAt||Date.now())))+' · funded account opened</span>' : goalLine(g)}
+            ${a.fundedId ? '<span class="acctgoal">passed '+esc(tzDateTime(Date.parse(a.passedAt||Date.now())))+' · funded account opened</span>' : goalLine(g)}
           </button>
           ${acctFirm(a) ? '' : `<select class="firmsel" data-firm="${a.id}" title="Which firm is this account with?">
             <option value="">firm?</option>${Object.keys(FIRMS).map(k=>'<option value="'+k+'">'+esc(FIRMS[k].name)+'</option>').join('')}
@@ -1528,11 +1561,16 @@
   }
   const entryOf = t => +t.entry||0;
   const clamp01 = v => Math.max(0, Math.min(1, v));
-  // ================= Melbourne time =================
-  // Every time on screen is Melbourne wall-clock, not the viewer's machine — someone opening
-  // this from another country must read the same clock you trade to. The IANA zone carries the
-  // AEST/AEDT switch itself, so daylight saving needs no handling here and no yearly upkeep.
-  const TZ = 'Australia/Melbourne';
+  // ================= local time =================
+  // Every time on screen is the viewer's own wall clock, read off their device. Two people in
+  // different countries looking at the same trade each see it in their own time. The IANA zone
+  // the browser reports carries its daylight-saving switch itself, so DST needs no handling
+  // here and no yearly upkeep. The one thing that is NOT converted is the day roll: that is a
+  // firm's rule, fixed in UTC, and it stays there.
+  const TZ = (()=>{ try{ return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
+                    catch(e){ return 'UTC'; } })();
+  // the city out of the zone id, for saying which clock you are reading
+  const tzCity = () => { const p=String(TZ).split('/').pop(); return p ? p.replace(/_/g,' ') : TZ; };
   const _fmt = (opts) => new Intl.DateTimeFormat('en-AU', Object.assign({timeZone:TZ}, opts));
   function tzParts(ms){
     const f=_fmt({year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',
@@ -1540,12 +1578,12 @@
     const p={}; for(const x of f.formatToParts(new Date(ms))) if(x.type!=='literal') p[x.type]=x.value;
     return p;
   }
-  // Melbourne's offset from UTC at that instant, in ms (+10h or +11h)
+  // the zone's offset from UTC at that instant, in ms
   function tzOffset(ms){
     const p=tzParts(ms);
     return Date.UTC(+p.year, +p.month-1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(ms/1000)*1000;
   }
-  // a Melbourne wall-clock string ("2026-08-31T14:05") back to a real instant
+  // a local wall-clock string ("2026-08-31T14:05") back to a real instant
   function tzParse(str){
     const m=/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(String(str||''));
     if(!m) return NaN;
@@ -1555,15 +1593,15 @@
   }
   const dtLocal = d => { const p=tzParts(typeof d==='number'?d:d.getTime());
                          return p.year+'-'+p.month+'-'+p.day+'T'+p.hour+':'+p.minute; };
-  const melTime = ms => { const p=tzParts(ms); return p.hour+':'+p.minute; };
-  const melDateTime = ms => { const p=tzParts(ms); return p.year+'-'+p.month+'-'+p.day+' '+p.hour+':'+p.minute; };
-  const melWhen = ms => _fmt({weekday:'short', day:'numeric', month:'short', hour:'2-digit',
+  const tzTime = ms => { const p=tzParts(ms); return p.hour+':'+p.minute; };
+  const tzDateTime = ms => { const p=tzParts(ms); return p.year+'-'+p.month+'-'+p.day+' '+p.hour+':'+p.minute; };
+  const tzWhen = ms => _fmt({weekday:'short', day:'numeric', month:'short', hour:'2-digit',
                               minute:'2-digit', hourCycle:'h23'}).format(new Date(ms));
   const tzAbbr = () => { const p=_fmt({timeZoneName:'short'}).formatToParts(new Date())
-                           .find(x=>x.type==='timeZoneName'); return p?p.value:'AEST'; };
-  // when Breakout's 00:30 UTC day-roll lands on a Melbourne clock — 10:30 or 11:30 depending on DST
+                           .find(x=>x.type==='timeZoneName'); return p?p.value:TZ; };
+  // where the firm's UTC day-roll lands on your clock, daylight saving included
   const rollLocal = () => { const d=new Date(); d.setUTCHours(0,DAY_ROLL_MIN,0,0);
-                            return melTime(d.getTime()); };
+                            return tzTime(d.getTime()); };
   const dirTag = t => '<span class="dir '+(t.dir==='short'?'short':'long')+'">'+(t.dir==='short'?'SHORT':'LONG')+'</span>';
 
   // ================= OKX price feed =================
@@ -1835,7 +1873,7 @@
       '<div class="lhead"><b>'+esc(t.sym||'—')+' '+dirTag(t)+'</b>'+
         '<span class="lacct" title="'+(priceRiskOf(t)!=null ? fmt$2(priceRiskOf(t))+' to the stop plus '+fmt$2(t.risk-priceRiskOf(t))+' of costs' : '')+'">'+
           (t.entry? 'entry '+t.entry+' · ':'')+fmt$(t.risk)+' at risk · opened '+
-          esc(t.opened ? melDateTime(Date.parse(t.opened)) : (t.date||''))+
+          esc(t.opened ? tzDateTime(Date.parse(t.opened)) : (t.date||''))+
           ' · '+esc(FIRMS[firmOf(t)].name)+'</span>'+
         '<span class="lflag" data-out="flag-'+id+'">'+liveFlag(L)+'</span></div>'+
       '<div class="lgrid">'+
@@ -1925,7 +1963,7 @@
   function alertBanner(t){
     if(!t.alerted) return '';
     const tgt = t.alerted==='target';
-    const when = t.alertAt ? melTime(Date.parse(t.alertAt)) : '';
+    const when = t.alertAt ? tzTime(Date.parse(t.alertAt)) : '';
     let worth='';
     if(priceable(t)){
       const lvl = tgt ? +t.target : +t.stop;
@@ -2924,8 +2962,8 @@
   // knowing what time that is where you are, because it moves an hour with daylight saving.
   function stampClock(){
     const el=$('clockNote'); if(!el) return;
-    el.textContent = 'All times '+tzAbbr()+' (Melbourne) · '+melWhen(Date.now())+
-                     ' · Breakout\'s daily limit resets at '+rollLocal()+' your time';
+    el.textContent = 'All times '+tzAbbr()+' ('+tzCity()+', your device) · '+tzWhen(Date.now())+
+                     ' · '+FIRM.name+'\'s daily limit resets at '+rollLocal()+' your time';
   }
   // Which trades are already logged today ON THE ACCOUNT BEING CHECKED. Each account carries its
   // own daily loss limit and its own drawdown floor, so a trade taken on another account must not
@@ -2937,7 +2975,7 @@
   }
   const tradesToday = () => tradesTodayList().length;
   function describeTrade(t){
-    const when = t.opened ? melTime(Date.parse(t.opened)) : '';
+    const when = t.opened ? tzTime(Date.parse(t.opened)) : '';
     return (t.sym||'trade')+' '+(t.dir==='short'?'short':'long')+(when?' '+when:'')+
            (t.status==='open' ? ' (open)' : ' ('+fmt$2(+t.pl||0)+')');
   }
@@ -3069,7 +3107,7 @@
         `(${(FIN_DAILY*100).toFixed(3)}% of notional ÷ your ${(stopPct*100).toFixed(2)}% stop). `+
         (finFee<0
           ? `Over ${holdH2}h that is <strong>${fmt$2(Math.abs(finFee))} in your favour</strong>, so holding longer helps rather than costs. It flips if the premium turns, so do not build the plan on it.`
-          : `Budgeted for ${holdH2}h = <strong>${fmt$2(finFee)}</strong>, ${(finShare*100).toFixed(1)}% of risk — so close or re-size by <strong>${melWhen(closeBy.getTime())}</strong> or you drift past budget.`)
+          : `Budgeted for ${holdH2}h = <strong>${fmt$2(finFee)}</strong>, ${(finShare*100).toFixed(1)}% of risk — so close or re-size by <strong>${tzWhen(closeBy.getTime())}</strong> or you drift past budget.`)
       : 'Set an entry and stop to price the holding cost.';
 
     const grossRR = stopDist>0 && tgt>0 ? Math.abs(tgt-entry)/stopDist : 0;
@@ -3708,6 +3746,28 @@
     try{ const raw=localStorage.getItem(STORE_KEY); if(raw) s=JSON.parse(raw); }catch(e){}
     applyState(s||DEFAULTS);
   }
+  const THEME_KEY='prop-firm-edge-theme';
+  const ICON_SUN='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">'+
+    '<circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.4M12 19.6V22M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7'+
+    'M2 12h2.4M19.6 12H22M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>';
+  const ICON_MOON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '+
+    'stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"/></svg>';
+  let theme='dark';
+  function applyTheme(t){
+    theme = t==='light' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = theme;
+    const b=$('themeBtn'); if(!b) return;
+    // the icon is the switch you are about to throw, not the mode you are in
+    b.innerHTML = theme==='light' ? ICON_MOON : ICON_SUN;
+    b.title = 'Switch to '+(theme==='light'?'dark':'light')+' mode';
+    b.setAttribute('aria-label', b.title);
+  }
+  try{ applyTheme(localStorage.getItem(THEME_KEY)); }catch(e){ applyTheme('dark'); }
+  $('themeBtn').addEventListener('click',()=>{
+    applyTheme(theme==='light' ? 'dark' : 'light');
+    try{ localStorage.setItem(THEME_KEY, theme); }catch(e){}
+  });
+
   $('resetBtn').addEventListener('click',()=>{
     try{ localStorage.removeItem(STORE_KEY); }catch(e){}
     applyState(DEFAULTS); saveState(); recalc(); renderChecker();
