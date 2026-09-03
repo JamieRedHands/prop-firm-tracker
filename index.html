@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="7b7ac91 · 3 Sept 2026, 10:36">
+<meta name="build" content="8f5fc27 · 3 Sept 2026, 10:48">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}html[data-theme="light"]{color-scheme:light}html[data-theme="light"] body{background:#f4f6f8}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -2009,20 +2009,41 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   // back tomorrow (or switch symbol) and it goes back to following the book.
   let entrySeed = {sym:null, day:null};
   function entryTyped(){ try{ return JSON.parse(localStorage.getItem(ENTRY_KEY))||{}; }catch(e){ return {}; } }
-  function markEntryTyped(){
+  // Typing into any of the three claims that field for the rest of the trading day. They are
+  // tracked separately so seeding a fresh entry does not overwrite a stop you set yourself.
+  function markLevelTyped(which){
+    const r=entryTyped(), sym=$('cSym').value, day=tradingDay();
+    const fields = (r.day===day && r.sym===sym && r.fields) ? r.fields : {};
+    fields[which]=true;
     try{ localStorage.setItem(ENTRY_KEY, JSON.stringify(
-      {sym:$('cSym').value, day:tradingDay(), px:$('cEntry').value})); }catch(e){}
+      {sym, day, fields, px:$('cEntry').value, stop:$('cStop').value, tgt:$('cTarget').value})); }catch(e){}
   }
+  const roundPx = (v,ref) => String(+v.toFixed(ref>=1000 ? 1 : 4));
   function seedEntry(){
     const el=$('cEntry'); if(!el) return;
     const sym=$('cSym').value, day=tradingDay();
     const yours=entryTyped();
-    if(yours.day===day && yours.sym===sym) return;            // you typed this one today
-    if(entrySeed.sym===sym && entrySeed.day===day) return;     // already seeded, leave it alone
+    const mine = (yours.day===day && yours.sym===sym) ? (yours.fields||{}) : {};
+    if(mine.entry) return;                                     // you typed this one today
+    if(entrySeed.sym===sym && entrySeed.day===day) return;      // already seeded, leave it alone
     const q=(feed.px[feedOf(FIRM_KEY).src]||{})[sym];
     if(!q || !(q.last>0)) return;
     entrySeed={sym, day};
-    el.value = String(+q.last.toFixed(q.last>=1000 ? 1 : 4));
+    const old=+el.value||0, px=+q.last;
+    el.value = roundPx(px, px);
+
+    // A price from the market with yesterday's stop and target left where they were puts both of
+    // them on the same side of the entry, which fails the rule check before you have typed
+    // anything. Carry the bracket across at the same distances instead, and fall back to a plain
+    // long if what was there did not straddle the entry.
+    const st=$('cStop'), tg=$('cTarget');
+    const s0=+st.value||0, t0=+tg.value||0;
+    let sPct = (old>0 && s0>0) ? (s0-old)/old : -0.015;
+    let tPct = (old>0 && t0>0) ? (t0-old)/old :  0.035;
+    const straddles = (sPct<0 && tPct>0) || (sPct>0 && tPct<0);
+    if(!straddles){ sPct=-0.015; tPct=0.035; }
+    if(!mine.stop)   st.value = roundPx(px*(1+sPct), px);
+    if(!mine.target) tg.value = roundPx(px*(1+tPct), px);
     renderChecker();
   }
 
@@ -3866,7 +3887,9 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   ['cDayStart','cToday','cFloat','cOpen','cEntry','cStop','cTarget','cRisk','cHold','cFlatPct']
     .forEach(id=>$(id).addEventListener('input',renderChecker));
   ['cSym','cPlat'].forEach(id=>$(id).addEventListener('change',renderChecker));
-  $('cEntry').addEventListener('input',markEntryTyped);
+  $('cEntry').addEventListener('input',()=>markLevelTyped('entry'));
+  $('cStop').addEventListener('input',()=>markLevelTyped('stop'));
+  $('cTarget').addEventListener('input',()=>markLevelTyped('target'));
   $('cSym').addEventListener('change',()=>{ entrySeed={sym:null,day:null}; seedEntry(); });
   // timeframe sets a default max hold — how long you'd let a trade run before closing it
   const TF_HOLD = {15:6, 60:24, 240:96, 1440:336};
@@ -4159,7 +4182,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   const FIELD_IDS = Object.keys(DEFAULTS);
   // cEntry is saved too: a price you typed is yours until the trading day rolls, at which
   // point seedEntry replaces it with the live one rather than leaving yesterday's number.
-  const EXTRA_IDS = ['cFill','cCond','cPlat','cHold','cMaxTrades','cUsePct','cSym','cEntry'];
+  const EXTRA_IDS = ['cFill','cCond','cPlat','cHold','cMaxTrades','cUsePct','cSym','cEntry','cStop','cTarget'];
   function saveState(){
     try{
       const s={}; FIELD_IDS.forEach(id=>s[id]=$(id).value);
