@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="316c7aa · 4 Sept 2026, 14:10">
+<meta name="build" content="ee074fb · 4 Sept 2026, 14:20">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}html[data-theme="light"]{color-scheme:light}html[data-theme="light"] body{background:#f4f6f8}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -126,6 +126,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   textarea{font-family:"IBM Plex Sans",sans-serif; resize:vertical}
   .duo input[type=number]{width:84px; flex:none}
   input:focus-visible, select:focus-visible, textarea:focus-visible{outline:2px solid var(--focus); outline-offset:1px}
+  input.badtime{border-color:var(--bad)}
   input:disabled, select:disabled{opacity:.5; cursor:not-allowed}
   .grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
   .grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:10px}
@@ -633,6 +634,10 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   .hold .acctgoal .bar i{display:block; height:100%; background:var(--accent)}
   .hold.funded .acctgoal .bar i{background:var(--good)}
   .hold .acctgoal .bar i.dd, .hold.funded .acctgoal .bar i.dd{margin-left:auto; background:var(--bad)}
+  /* tiles in a row are as tall as the tallest; the goal line and its bar sit at the bottom of each,
+     so the bars line up whatever the text above them wraps to */
+  .hold{display:flex; flex-direction:column}
+  .hold .acctgoal{margin-top:auto; padding-top:6px}
   .empty{color:var(--muted); font-size:13px; text-align:center; padding:26px 0}
 
   footer{margin-top:26px; font-size:12px; line-height:1.45; color:var(--muted);
@@ -987,7 +992,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         </div>
         <div class="field" id="cReplayWhenField" hidden style="margin-bottom:10px">
           <label><span class="lbl">Opened at</span></label>
-          <input type="datetime-local" id="cReplayWhen">
+          <input type="text" id="cReplayWhen" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="dd/mm/yyyy hh:mm" title="Day first, 24-hour clock, e.g. 05/02/2023 23:00">
           <div class="hint">The date and time on the replay chart, not the clock on the wall. Everything
             that counts by day — the daily loss limit, the trades-per-day budget — uses this.</div>
         </div>
@@ -1223,9 +1228,12 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   const replayOn = () => !!($('cReplay') && $('cReplay').checked);
   // an empty or unparseable box falls back to now rather than stamping the trade on 1970
   function replayWhenMs(){
-    const el=$('cReplayWhen');
-    const v = el && el.value ? tzParse(el.value) : NaN;
-    return isNaN(v) ? Date.now() : v;
+    const el=$('cReplayWhen'); if(!el) return Date.now();
+    const v = el.value ? tzParse(el.value) : NaN;
+    el.classList.toggle('badtime', !!el.value && isNaN(v));
+    if(!isNaN(v)){ el.dataset.ms=String(v); return v; }
+    // half-typed: hold the last time that made sense rather than jumping to today
+    return el.dataset.ms ? +el.dataset.ms : Date.now();
   }
   const isPaperAcct = a => !!a && (a.paper===true || a.plan==='paper');   // 'paper' plans are pre-toggle saves
 
@@ -2151,15 +2159,27 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     return Date.UTC(+p.year, +p.month-1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(ms/1000)*1000;
   }
   // a local wall-clock string ("2026-08-31T14:05") back to a real instant
+  // A wall-clock time in the zone, as typed: day first with a 24-hour clock (05/02/2023 23:00,
+  // 5/2/2023 9:00), or the ISO form the rest of the code and older saved values use.
   function tzParse(str){
-    const m=/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(String(str||''));
-    if(!m) return NaN;
-    const wall=Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5]);
+    const v=String(str||'').trim();
+    let m=/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(v), y,mo,d,h,mi;
+    if(m){ y=+m[1]; mo=+m[2]; d=+m[3]; h=+m[4]; mi=+m[5]; }
+    else{
+      m=/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})[ ,T]+(\d{1,2})[:.](\d{2})$/.exec(v);
+      if(!m) return NaN;
+      d=+m[1]; mo=+m[2]; y=+m[3]; h=+m[4]; mi=+m[5];
+    }
+    if(mo<1||mo>12||d<1||d>31||h>23||mi>59) return NaN;
+    const wall=Date.UTC(y,mo-1,d,h,mi);
     let ms=wall-tzOffset(wall);
     return wall-tzOffset(ms);          // second pass settles the twice-yearly DST edge
   }
   const dtLocal = d => { const p=tzParts(typeof d==='number'?d:d.getTime());
                          return p.year+'-'+p.month+'-'+p.day+'T'+p.hour+':'+p.minute; };
+  // the same moment the way it is typed into the boxes: day first, 24-hour clock
+  const dtShow  = d => { const p=tzParts(typeof d==='number'?d:d.getTime());
+                         return p.day+'/'+p.month+'/'+p.year+' '+p.hour+':'+p.minute; };
   const tzTime = ms => { const p=tzParts(ms); return p.hour+':'+p.minute; };
   // Stored dates stay ISO — that is what sorts and compares correctly. These are for reading.
   const showDay = iso => { const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||''));
@@ -2349,10 +2369,10 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const lvl = t.alerted==='target' ? +t.target : t.alerted==='stop' ? +t.stop : 0;
     if(t.alerted && lvl>0){
       return {px:lvl, kind: t.alerted==='target' ? 'maker' : 'taker',
-              ms: t.alertAt ? Date.parse(t.alertAt) : Date.now(), locked:true};
+              ms: t.alertAt ? Date.parse(t.alertAt) : costClock(t), locked:true};
     }
     const px = markFor(t);
-    return px==null ? null : {px, kind:'taker', ms:Date.now(), locked:false};
+    return px==null ? null : {px, kind:'taker', ms:costClock(t), locked:false};
   }
   // the rate a leg actually paid, read back off the money rather than assumed
   const pctOf = (fee, notional) => notional>0 ? (fee/notional*100).toFixed(3)+'%' : '—';
@@ -2508,15 +2528,15 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         '<span class="lflag" data-out="flag-'+id+'">'+liveFlag(L)+'</span></div>'+
       '<div class="lgrid">'+
         priceCell(t)+
-        (locked ? '' : (()=>{ const be=breakevenPx(t, Date.now());
+        (locked ? '' : (()=>{ const be=breakevenPx(t, costClock(t));
           return '<div><span class="lk">Breakeven now</span><span class="lv" data-out="be-'+id+'">'+
                  (be!=null?px6(be):'—')+'</span>'+
                  '<span class="lsub '+(be!=null&&px!=null&&(px-be)*(t.dir==='short'?-1:1)>=0?'pos':'')+
                  '" data-out="besub-'+id+'">'+beSub(t,be,px)+'</span></div>'; })())+
         '<div><span class="lk" data-out="pllabel-'+id+'">'+(locked?(t.alerted==='target'?'P/L at your target':'P/L at your stop'):'P/L if closed now')+'</span><span class="lv '+(c&&c.gross>=0?'pos':c?'neg':'')+'" data-out="pl-'+id+'">'+(c?fmt$2(c.gross):'—')+'</span><span class="lsub">before costs</span></div>'+
         '<div><span class="lk" data-out="rlabel-'+id+'">'+(locked?'R locked in':'R so far')+'</span><span class="lv '+(c&&c.Rg>=0?'pos':c?'neg':'')+'" data-out="rg-'+id+'">'+(c?(c.Rg>=0?'+':'')+c.Rg.toFixed(2)+'R':'—')+'</span></div>'+
-        '<div><span class="lk">Held</span><span class="lv" data-out="held-'+id+'">'+(c?c.hours.toFixed(1)+'h':'—')+'</span></div>'+
-        '<div><span class="lk" data-out="feelabel-'+id+'">'+(locked?'Costs':'Costs so far')+'</span><span class="lv" data-out="fees-'+id+'">'+(c?fmt$2(c.fees):'—')+'</span></div>'+
+        '<div><span class="lk">Held</span><span class="lv" data-out="held-'+id+'">'+(t.replay ? '—' : c?c.hours.toFixed(1)+'h':'—')+'</span></div>'+
+        '<div><span class="lk" data-out="feelabel-'+id+'">'+(t.replay?'Commissions':locked?'Costs':'Costs so far')+'</span><span class="lv" data-out="fees-'+id+'">'+(c?fmt$2(c.fees):'—')+'</span></div>'+
         '<div><span class="lk">Net after costs</span><span class="lv '+plCls(c)+'" data-out="pln-'+id+'">'+(c?fmt$2(c.net):'—')+'</span>'+
           '<span class="lsub" data-out="rn-'+id+'">'+(c?(c.R>=0?'+':'')+c.R.toFixed(2)+'R net':'')+'</span></div>'+
         (sn ? '<div><span class="lk">If stopped now</span><span class="lv neg" data-out="stp-'+id+'">'+fmt$2(sn.net)+'</span>'+
@@ -2531,8 +2551,12 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       '</div></div>';
   }
   const plCls = c => !c ? '' : (c.net>=0?'pos':'neg');
+  // The moment an open trade's costs are counted to. A replay trade has no wall-clock age - the
+  // clock on the wall is years past the chart - so on the Dashboard it carries no holding time
+  // and no financing: commissions only, until it is settled at a time you give.
+  const costClock = t => t.replay ? openedMs(t) : Date.now();
   const stopNow = t => (priceable(t) && +t.stop>0 && !t.alerted)
-    ? settleCalc(t, +t.stop, Date.now(), 'taker') : null;
+    ? settleCalc(t, +t.stop, costClock(t), 'taker') : null;
   function breakevenPx(t, ms){
     const entry=entryOf(t);
     if(!(entry>0) || !(+t.units>0)) return null;
@@ -2666,11 +2690,11 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     set('rn',  c?(c.R>=0?'+':'')+c.R.toFixed(2)+'R net':'');
     const sn2 = stopNow(t);
     if(sn2){ set('stp', fmt$2(sn2.net)); set('stpr', sn2.R.toFixed(2)+'R all in'); }
-    const be = breakevenPx(t, Date.now());
+    const be = breakevenPx(t, costClock(t));
     set('be',    be!=null?px6(be):'—');
     set('besub', beSub(t, be, px),
         be!=null && px!=null && (px-be)*(t.dir==='short'?-1:1)>=0 ? 'pos' : '');
-    set('held', c?c.hours.toFixed(1)+'h':'—');
+    set('held', t.replay ? '—' : c?c.hours.toFixed(1)+'h':'—');
     set('fees', c?fmt$2(c.fees):'—');
     set('flag', liveFlag(L));
     row.classList.remove('hitStop','hitTgt');
@@ -2781,7 +2805,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const filledAt = hit ? Date.parse(t.alertAt)
                    : t.replay ? Math.max(opened, replayOn() ? replayWhenMs() : opened)
                    : Date.now();
-    settling = {id, how, exit:px||'', when:dtLocal(filledAt), override:''};
+    settling = {id, how, exit:px||'', when:dtShow(filledAt), override:''};
     // the panel lives on the Journal tab, so bring it into view wherever it was triggered from
     showView('view-jrn');
     renderJournal(); renderJournalStats();
@@ -2810,7 +2834,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
           : '')+
         (can
           ? '<div class="field"><label><span class="lbl">Closed at</span></label>'+
-            '<input type="datetime-local" id="sWhen" value="'+settling.when+'"></div>'
+            '<input type="text" id="sWhen" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="dd/mm/yyyy hh:mm" title="Day first, 24-hour clock, e.g. 05/02/2023 23:00" value="'+settling.when+'"></div>'
           : '')+
         '<div class="field"><label><span class="lbl">Broker P/L $</span></label>'+
         '<input type="number" id="sOverride" step="any" value="'+settling.override+'" placeholder="'+
@@ -2887,7 +2911,8 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const ov = ovRaw!=='' && !isNaN(+ovRaw) ? +ovRaw : null;
     if(priceable(t)){
       const px=+$('sExit').value||0;
-      const ms=tzParse($('sWhen').value) || Date.now();
+      const whenRaw=$('sWhen').value.trim(), ms=whenRaw ? tzParse(whenRaw) : Date.now();
+      if(isNaN(ms)){ $('sMsg').textContent='Closed at needs a day-first date and 24-hour time, like 05/02/2023 23:00.'; return; }
       if(!(px>0) && ov==null){ $('sMsg').textContent='Enter the exit price, or the P/L your broker shows.'; return; }
       if(px>0){
         const c=settleCalc(t,px,ms, settling.how==='win' ? 'maker' : 'taker');
@@ -2899,7 +2924,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         t.slip=c.ref!=null ? Math.round(c.slip$*100)/100 : null;
         t.pl = ov!=null ? ov : Math.round(c.net*100)/100;
       } else {
-        t.pl=ov; t.dateClosed=tradingDay(undefined, acctById(jAcct(t)));
+        t.pl=ov; t.closedAt=new Date(ms).toISOString(); t.dateClosed=tradingDay(ms, acctById(jAcct(t)));
       }
     } else {
       if(ov==null){ $('sMsg').textContent='Enter the P/L for this trade.'; return; }
@@ -3670,14 +3695,15 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       return '<div class="hold '+(a.stage==='funded'?'funded':'')+'">'+
         '<b>'+esc(acctName(a))+(isPaperAcct(a)?'<span class="paperbadge">PAPER</span>':'')+chip+'</b>'+
         '<span class="meta">balance '+fmt$(acctBalance(a))+'</span>'+
-        (a.fundedId
-          ? '<span class="acctgoal">passed '+esc(tzDateTime(Date.parse(a.passedAt||Date.now())))+
-            ' · funded account opened</span>'
-          : goalLine(g))+
         (withdrawable(a)
           ? '<button class="btn win wdbtn" data-withdraw="'+a.id+'">Withdraw '+fmt$2(payoutOn(a))+
             ' — your '+acctSplit(a)+'% of '+fmt$2(acctProfitNow(a))+'</button>'
           : '')+
+        // last in every tile, so the bars line up along the bottom of the row
+        (a.fundedId
+          ? '<span class="acctgoal">passed '+esc(tzDateTime(Date.parse(a.passedAt||Date.now())))+
+            ' · funded account opened</span>'
+          : goalLine(g))+
       '</div>';
     }).join('');
     // the one thing you can do from here: take what a funded account has made
@@ -3790,9 +3816,16 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   // Which trading day this check belongs to. In replay that is the day on the replay chart, so
   // the daily limit and the trade budget count against the right day rather than against today.
   function checkDay(){ return tradingDay(replayOn() ? replayWhenMs() : Date.now(), activeAccount()); }
+  // In replay the check is about a moment, not just a day. A trade closed later that day has not
+  // happened yet, so it is not realised; a trade opened later has not been taken. Live, everything
+  // in the journal has happened.
+  const asOfMs   = () => replayOn() ? replayWhenMs() : Infinity;
+  const closedBy = (t, ms) => !t.closedAt || Date.parse(t.closedAt) <= ms;
+  const openedBy = (t, ms) => !t.opened || Date.parse(t.opened) <= ms;
   function tradesTodayList(){
     const d=checkDay();
-    return journal.filter(t=>(t.date===d || t.dateClosed===d) && jAcct(t)===activeAcctId);
+    const asOf=asOfMs();
+    return journal.filter(t=>(t.date===d || t.dateClosed===d) && jAcct(t)===activeAcctId && openedBy(t, asOf));
   }
   const tradesToday = () => tradesTodayList().length;
   function describeTrade(t){
@@ -4187,14 +4220,17 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         '. The daily loss limit is measured from it.'
       : 'No account selected, so this is the size set on New Eval.';
 
-    // realised P/L lands on the day the trade was closed, which is the day the limit sees it
-    const todays = closed.filter(t=>dayOf(t)===day);
+    // realised P/L lands on the day the trade was closed, which is the day the limit sees it -
+    // and, in replay, only once the clock has reached the close
+    const asOf = asOfMs();
+    const todays = closed.filter(t=>dayOf(t)===day && closedBy(t, asOf));
     roSet('cToday', sum(todays));
     $('cTodayHint').textContent = todays.length
       ? 'From '+todays.length+' trade'+(todays.length===1?'':'s')+' closed '+showDay(day)+' '+who+'.'
       : 'Nothing closed on '+showDay(day)+' '+who+'.';
 
-    const open = mine.filter(t=>t.status==='open');
+    // open at that moment: still open now, or closed later than the clock has reached
+    const open = mine.filter(t=>openedBy(t, asOf) && (t.status==='open' || !closedBy(t, asOf)));
     roSet('cOpen', open.length ? Math.round(open.reduce((x,t)=>x+(+t.risk||0),0)) : 0);
     $('cOpenHint').textContent = open.length
       ? 'From '+open.length+' open position'+(open.length===1?'':'s')+' '+who+
@@ -4331,8 +4367,8 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const on=replayOn();
     $('cReplayWhenField').hidden = !on;
     // opening the box empty and stamping "now" silently would be worse than showing the clock
-    if(on && !$('cReplayWhen').value) $('cReplayWhen').value = dtLocal(Date.now());
-    renderChecker(); saveState();
+    if(on && !$('cReplayWhen').value) $('cReplayWhen').value = dtShow(Date.now());
+    syncCheckerToday(); renderChecker(); saveState();     // Account state is about a different moment now
   });
   $('cReplayWhen').addEventListener('input',()=>{ syncCheckerToday(); renderChecker(); });
   ['jStatsScope','jStatsPaper'].forEach(id=>$(id).addEventListener('change',()=>{
