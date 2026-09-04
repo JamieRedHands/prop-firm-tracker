@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="17bb5a8 · 4 Sept 2026, 12:09">
+<meta name="build" content="03f0745 · 4 Sept 2026, 12:23">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}html[data-theme="light"]{color-scheme:light}html[data-theme="light"] body{background:#f4f6f8}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -614,6 +614,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   .hold{background:var(--inset); border:1px solid var(--border); border-radius:8px; padding:9px 11px}
   .hold.funded{border-color:var(--good)}
   .hold b{display:block; font-size:13px; font-weight:600; color:var(--ink)}
+  .hold .wdbtn{width:100%; margin-top:9px; font-size:12px; padding:7px 10px}
   .hold .meta{display:block; margin-top:2px; font-size:11.5px; color:var(--muted);
     font-family:"IBM Plex Mono",monospace}
   .hold .paperbadge{margin-left:6px}
@@ -1190,10 +1191,12 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
 
       <div class="card" id="dPastCard" hidden>
         <h3>Closed accounts<span id="dPastCount"></span></h3>
-        <p class="sub">What each account you have finished with made or lost. The trades themselves
-          are in the table above.</p>
+        <p class="sub">What each account you have finished with did. P/L is what it made on the
+          chart; Cash is what it was actually worth — an evaluation costs its fee and pays nothing,
+          because passing one buys a funded account rather than money, and a funded account is
+          worth what you have withdrawn from it.</p>
         <div style="overflow-x:auto"><table id="dPast">
-          <thead><tr><th>Account</th><th>Outcome</th><th>Closed</th><th>Trades</th><th>Net</th></tr></thead>
+          <thead><tr><th>Account</th><th>Outcome</th><th>Closed</th><th>Trades</th><th>P/L</th><th>Cash</th></tr></thead>
           <tbody></tbody>
         </table></div>
       </div>
@@ -1586,9 +1589,6 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
           <button class="del" data-del="${a.id}" title="Close this account — its record is kept on the Dashboard" aria-label="Close account">×</button>
         </div>`
         +(ready ? `<button class="btn win passbtn" data-pass="${a.id}">Passed — open the funded account</button>` : '')
-        +(withdrawable(a) ? `<button class="btn win passbtn" data-withdraw="${a.id}">
-            Withdraw ${fmt$2(payoutOn(a))} — your ${acctSplit(a)}% of ${fmt$2(acctProfitNow(a))}
-          </button>` : '')
         +(looksBreached(a) ? `<div class="breachask">
             <b>Is this account blown?</b>
             <span>Its trades add up to ${fmt$(acctProfit(a))}, which is through the ${fmt$(a.size*((planRulesFor(a).maxdd==null?6:planRulesFor(a).maxdd)/100))} max drawdown. Nothing is closed until you say so.</span>
@@ -1619,16 +1619,6 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       }));
       $('acctList').querySelectorAll('[data-pass]').forEach(b=>b.addEventListener('click',()=>{
         const a=acctById(+b.dataset.pass); if(a) promoteToFunded(a);
-      }));
-      $('acctList').querySelectorAll('[data-withdraw]').forEach(b=>b.addEventListener('click',()=>{
-        const a=acctById(+b.dataset.withdraw); if(!a || !withdrawable(a)) return;
-        const profit=acctProfitNow(a), split=acctSplit(a), paid=profit*split/100;
-        if(!Array.isArray(a.payouts)) a.payouts=[];
-        a.payouts.push({at:new Date().toISOString(), profit, split, paid});
-        saveAccounts(); renderAccounts(); syncCheckerToday(); renderChecker();
-        renderJournal(); renderJournalStats();
-        toast('Withdrew '+fmt$2(paid)+' from '+acctName(a),
-              'Your '+split+'% of '+fmt$2(profit)+'. The account counts from '+fmt$(a.size)+' again.');
       }));
       $('acctList').querySelectorAll('[data-breach]').forEach(b=>b.addEventListener('click',()=>{
         const a=acctById(+b.dataset.breach); if(!a) return;
@@ -1672,7 +1662,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       const plan=$('plan').value, tbl=FEES[plan]||{};
       const size = tbl[10000] ? 10000 : (Object.keys(tbl).map(Number).sort((x,y)=>x-y)[0] || 10000);
       const a={id:Date.now(), label:'Paper '+cap(plan)+' '+fmt$(size), plan, size, bal:size,
-               stage:'eval', paper:true, firm:FIRM_KEY, split:+$('split').value||80, payouts:[]};
+               stage:'eval', paper:true, firm:FIRM_KEY, split:+$('split').value||80, payouts:[], fee:0};
       accounts.push(a); activeAcctId=a.id; a.label=acctName(a);
     }
     saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
@@ -1720,7 +1710,8 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const n=accounts.filter(a=>a.plan===plan && a.size===size).length;
     const label=(paperOn()?'Paper ':'')+cap(plan)+' '+fmt$(size)+(n?' #'+(n+1):'');
     const a={id:Date.now(), label, plan, size, bal:size, stage:'eval', paper:paperOn(),
-             firm:FIRM_KEY, split:+$('split').value||80, payouts:[]};
+             firm:FIRM_KEY, split:+$('split').value||80, payouts:[],
+             fee: paperOn() ? 0 : (+$('cost').value||0)};
     accounts.push(a); activeAcctId=a.id; a.label=acctName(a);
     saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
     renderJournal(); renderJournalStats(); renderLive();
@@ -1806,6 +1797,23 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const offered = f ? f.splits.map(x=>x[0]) : [80];
     const want = +(a && a.split) || offered[0];
     return offered.includes(want) ? want : offered[0];
+  }
+  // What the account cost to open: its firm's published fee for that plan, size and split.
+  // A paper account costs nothing, and a funded account was not bought — the eval that became
+  // it was, and that eval keeps its own fee.
+  function acctFee(a){
+    if(!a || isPaperAcct(a) || a.stage==='funded') return 0;
+    if(a.fee!=null) return +a.fee||0;
+    const f=FIRMS[acctFirm(a)];
+    const row=f && f.fees[a.plan] && f.fees[a.plan][a.size];
+    return row ? row[acctSplit(a)===90?1:0] : 0;
+  }
+  // The money side of an account, which is not the same as what it made on the chart. An
+  // evaluation never pays: it costs its fee, and passing it buys a funded account, not cash.
+  // A funded account is worth exactly what has been withdrawn from it.
+  function acctCash(a){
+    if(!a) return 0;
+    return a.stage==='funded' ? acctPaidOut(a) : -acctFee(a);
   }
   const acctPayouts   = a => (a && Array.isArray(a.payouts)) ? a.payouts : [];
   const acctPaidOut   = a => acctPayouts(a).reduce((x,p)=>x+(+p.paid||0),0);
@@ -3499,12 +3507,18 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       .slice().sort((x,y)=>Date.parse(acctEnded(y).at||0)-Date.parse(acctEnded(x).at||0))
       .map(a=>{
         const e=acctEnded(a), r=acctResult(a);
+        const cash=acctCash(a);
         return '<tr><td>'+esc(acctName(a))+
             (isPaperAcct(a)?' <span class="paperbadge">P</span>':'')+'</td>'+
           '<td class="'+(e.how==='passed'?'pos':e.how==='breached'?'neg':'')+'">'+WORD[e.how]+'</td>'+
           '<td>'+esc(tzDateTime(Date.parse(e.at||Date.now())))+'</td>'+
           '<td>'+r.n+'</td>'+
-          '<td class="'+(r.net>=0?'pos':'neg')+'">'+fmt$2(r.net)+'</td></tr>';
+          '<td class="'+(r.net>=0?'pos':'neg')+'">'+fmt$2(r.net)+'</td>'+
+          '<td class="'+(cash>0?'pos':cash<0?'neg':'')+'" title="'+
+            (isPaperAcct(a) ? 'Paper — nothing was spent or paid'
+             : a.stage==='funded' ? 'Withdrawn from this funded account'
+             : 'The eval fee. Profit inside an evaluation is not money.')+'">'+
+            (cash===0 ? '—' : fmt$2(cash))+'</td></tr>';
       }).join('');
   }
 
@@ -3587,8 +3601,23 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
           ? '<span class="acctgoal">passed '+esc(tzDateTime(Date.parse(a.passedAt||Date.now())))+
             ' · funded account opened</span>'
           : goalLine(g))+
+        (withdrawable(a)
+          ? '<button class="btn win wdbtn" data-withdraw="'+a.id+'">Withdraw '+fmt$2(payoutOn(a))+
+            ' — your '+acctSplit(a)+'% of '+fmt$2(acctProfitNow(a))+'</button>'
+          : '')+
       '</div>';
     }).join('');
+    // the one thing you can do from here: take what a funded account has made
+    box.querySelectorAll('[data-withdraw]').forEach(b=>b.addEventListener('click',()=>{
+      const a=acctById(+b.dataset.withdraw); if(!a || !withdrawable(a)) return;
+      const profit=acctProfitNow(a), split=acctSplit(a), paid=profit*split/100;
+      if(!Array.isArray(a.payouts)) a.payouts=[];
+      a.payouts.push({at:new Date().toISOString(), profit, split, paid});
+      saveAccounts(); renderAccounts(); syncCheckerToday(); renderChecker();
+      renderJournal(); renderJournalStats();
+      toast('Withdrew '+fmt$2(paid)+' from '+acctName(a),
+            'Your '+split+'% of '+fmt$2(profit)+'. The account counts from '+fmt$(a.size)+' again.');
+    }));
   }
 
   function renderChart(points, cur){
