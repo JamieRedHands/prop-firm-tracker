@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="46ea739 · 4 Sept 2026, 11:06">
+<meta name="build" content="de5ddb5 · 4 Sept 2026, 11:34">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}html[data-theme="light"]{color-scheme:light}html[data-theme="light"] body{background:#f4f6f8}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -275,6 +275,11 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   .acctrow.funded .pick .acctgoal .bar i{background:var(--good)}
   .acctrow.hit .pick{border-color:var(--good); background:rgba(34,180,85,.10); color:var(--ink)}
   .passbtn{width:100%; margin:-2px 0 8px}
+  .breachask{border:1px solid var(--bad); border-radius:9px; padding:10px 12px; margin:-2px 0 10px;
+    background:rgba(214,64,64,.10)}
+  .breachask b{display:block; font-size:12.5px; color:var(--ink); margin-bottom:3px}
+  .breachask span{display:block; font-size:11.5px; color:var(--sub); line-height:1.45; margin-bottom:8px}
+  .breachask .btn{font-size:11.5px; padding:6px 10px}
   .paperbtn{display:inline-block; margin-top:7px; padding:6px 13px; font-size:12px}
   .firmsel{width:auto; flex:none; font-size:11px; padding:4px 6px; border-color:var(--accent)}
   .papersw{display:flex; align-items:center; gap:4px; font-size:10.5px; color:var(--muted);
@@ -469,13 +474,19 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   .ghead td{background:var(--inset); font-family:"IBM Plex Sans",sans-serif; font-weight:600; font-size:11.5px;
             color:var(--sub); text-transform:uppercase; letter-spacing:.07em; text-align:left;
             padding:9px 10px; border-bottom:1px solid var(--border); border-top:1px solid var(--border)}
-  .ghead.cur td{color:var(--accent); box-shadow:inset 2px 0 0 var(--accent)}
+  /* the name is coloured by firm, so a glance down the journal separates them; the rule down the
+     left is the account the Pre-Trade Check is pointed at, which is a different question */
+  .ghead.f-breakout td{color:var(--accent)}
+  .ghead.f-propr td{color:var(--good)}
+  .ghead.cur td{box-shadow:inset 2px 0 0 currentColor}
   .gsub{font-weight:400; text-transform:none; letter-spacing:0; color:var(--muted);
         font-family:"IBM Plex Mono",monospace; margin-left:9px}
   .ogroup + .ogroup{margin-top:14px; border-top:1px solid var(--border)}
   .ohead{font-size:11.5px; font-weight:600; color:var(--sub); text-transform:uppercase; letter-spacing:.07em;
          padding:11px 0 3px}
-  .ohead.cur{color:var(--accent)}
+  .ohead.f-breakout{color:var(--accent)}
+  .ohead.f-propr{color:var(--good)}
+  .ohead.cur{text-decoration:underline; text-underline-offset:3px}
 
   /* live position tracking */
   .live{border:1px solid var(--border); border-radius:9px; padding:12px 14px; margin-bottom:10px; background:var(--inset)}
@@ -610,17 +621,6 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   .hold .acctgoal .bar{display:block; height:3px; margin-top:3px; border-radius:2px;
     background:var(--line); overflow:hidden}
   .hold .acctgoal .bar i{display:block; height:100%; background:var(--accent)}
-  /* the record: finished accounts, dimmer than the ones you are still trading */
-  .hold.past b{color:var(--sub)}
-  .hold.past.breached{border-color:var(--bad)}
-  .hold.past.passed{border-color:var(--good)}
-  .hold .stagechip.breached{border-color:var(--bad); color:var(--bad)}
-  .hold .stagechip.closed{border-color:var(--muted); color:var(--muted)}
-  .hold .pastpl{display:block; margin-top:7px; font-family:"IBM Plex Mono",monospace;
-    font-size:15px; font-weight:600}
-  .hold .pastpl.pos{color:var(--good)} .hold .pastpl.neg{color:var(--bad)}
-  .hold .pastpl i{display:block; margin-top:2px; font-style:normal; font-size:11px;
-    font-weight:400; color:var(--muted)}
   .hold.funded .acctgoal .bar i{background:var(--good)}
   .empty{color:var(--muted); font-size:13px; text-align:center; padding:26px 0}
 
@@ -665,13 +665,6 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         <p class="sub">Every account you hold and how far each one is through its target. Read only —
           open, switch and close accounts under My accounts on the Pre-Trade Check.</p>
         <div class="holds" id="dHold"></div>
-      </div>
-
-      <div class="card" id="dPastCard" hidden>
-        <h3>Closed accounts<span id="dPastCount"></span></h3>
-        <p class="sub">Every account you have finished with — passed, breached, or closed by hand —
-          and what it made or lost while you had it. The trades themselves stay in the journal.</p>
-        <div class="holds" id="dPast"></div>
       </div>
 
       <div class="card" id="dLiveCard" hidden>
@@ -1004,16 +997,6 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
           <select id="cPlat"></select>
         </div>
         <div class="hint" id="cFinHint">—</div>
-        <div class="field" style="margin-top:12px">
-          <label><span class="lbl">Order fills</span></label>
-          <select id="cFill">
-            <option value="mm" selected>Limit in, limit target</option>
-            <option value="mt">Limit in, market out</option>
-            <option value="tm">Market in, limit target</option>
-            <option value="tt">Market in, market out</option>
-          </select>
-          <div class="hint" id="cFillHint">—</div>
-        </div>
         <div class="hint">Max hold is a commitment, not a guess: the position is sized to afford financing for that long, so a shorter trade simply costs less. Overstay it and your real risk creeps past budget.</div>
       </div>
 
@@ -1201,6 +1184,17 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
           </div>
         </div>
       </div>
+
+      <div class="card" id="dPastCard" hidden>
+        <h3>Closed accounts<span id="dPastCount"></span></h3>
+        <p class="sub">What each account you have finished with made or lost. The trades themselves
+          are in the table above.</p>
+        <div style="overflow-x:auto"><table id="dPast">
+          <thead><tr><th>Account</th><th>Outcome</th><th>Closed</th><th>Trades</th><th>Net</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -1238,7 +1232,9 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   // A trade is settled on the style it was SIZED with, not whatever the dropdown says today —
   // otherwise changing the control retroactively re-prices trades already in the record.
   const styleOf = k => FILL_STYLES[k] || FILL_STYLES.mm;
-  const fillStyle = (k) => styleOf(k || ($('cFill') ? $('cFill').value : 'mm'));
+  const entryFillNow = () => ($('cEnteredAt') && $('cEnteredAt').value==='taker') ? 'taker' : 'maker';
+  const fillStyle = (k) => k ? styleOf(k)
+    : styleOf(entryFillNow()==='taker' ? 'tm' : 'mm');   // target always rests, stop always crosses
   const fillKeyFor = (entry, target) =>
     Object.keys(FILL_STYLES).find(k=>FILL_STYLES[k].entry===entry && FILL_STYLES[k].target===target) || 'mm';
   const entryComm  = (k) => commRate(fillStyle(k).entry);
@@ -1520,6 +1516,9 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         if(a.plan==='paper'){ a.plan='classic'; a.paper=true; dirty=true; }
         if(a.paper===undefined){ a.paper=false; dirty=true; }
         if(a.firm===undefined){ a.firm=null; dirty=true; }
+        // a breach was briefly marked automatically; nobody confirmed those, so they are not
+        // findings — reopen them and let the account ask
+        if(a.ended && a.ended.how==='breached' && !a.ended.by){ delete a.ended; dirty=true; }
       });
       if(dirty) saveAccounts();
     }catch(e){ accounts=[]; activeAcctId=null; }
@@ -1546,7 +1545,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   }
 
   function renderAccounts(){
-    // a passed or breached account is a record, not something to trade — it lives on the Dashboard
+    syncBreaches();
     const openList = openAccounts();
     if(activeAcctId!=null && !openList.some(a=>a.id===activeAcctId)){
       activeAcctId = openList.length ? openList[0].id : null;
@@ -1576,7 +1575,16 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
             <input type="checkbox" data-paper-acct="${a.id}"${isPaperAcct(a)?' checked':''}>PAPER
           </label>
           <button class="del" data-del="${a.id}" title="Close this account — its record is kept on the Dashboard" aria-label="Close account">×</button>
-        </div>`+(ready ? `<button class="btn win passbtn" data-pass="${a.id}">Passed — open the funded account</button>` : '');
+        </div>`
+        +(ready ? `<button class="btn win passbtn" data-pass="${a.id}">Passed — open the funded account</button>` : '')
+        +(looksBreached(a) ? `<div class="breachask">
+            <b>Is this account blown?</b>
+            <span>Its trades add up to ${fmt$(acctProfit(a))}, which is through the ${fmt$(a.size*((planRulesFor(a).maxdd==null?6:planRulesFor(a).maxdd)/100))} max drawdown. Nothing is closed until you say so.</span>
+            <div class="btnrow">
+              <button class="btn loss" data-breach="${a.id}">Yes, it is breached</button>
+              <button class="btn ghost" data-nobreach="${a.id}">No — leave it open</button>
+            </div>
+          </div>` : '');
       }).join('');
       $('acctList').querySelectorAll('[data-pick]').forEach(b=>b.addEventListener('click',()=>{
         activeAcctId=+b.dataset.pick;
@@ -1599,6 +1607,18 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       }));
       $('acctList').querySelectorAll('[data-pass]').forEach(b=>b.addEventListener('click',()=>{
         const a=acctById(+b.dataset.pass); if(a) promoteToFunded(a);
+      }));
+      $('acctList').querySelectorAll('[data-breach]').forEach(b=>b.addEventListener('click',()=>{
+        const a=acctById(+b.dataset.breach); if(!a) return;
+        a.ended={how:'breached', at:new Date().toISOString(), by:'you'};
+        saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
+        renderJournal(); renderJournalStats(); renderLive();
+        toast('Closed '+acctName(a)+' as breached', 'Its record is in the journal under Closed accounts.');
+      }));
+      $('acctList').querySelectorAll('[data-nobreach]').forEach(b=>b.addEventListener('click',()=>{
+        const a=acctById(+b.dataset.nobreach); if(!a) return;
+        a.breachNoAt = acctProfit(a);      // asked and answered at this depth; ask again if it deepens
+        saveAccounts(); renderAccounts();
       }));
       $('acctList').querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{
         const id=+b.dataset.del, a=acctById(id); if(!a) return;
@@ -1787,19 +1807,41 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   // equity fell through the plan's static max drawdown. Either way it is not something you can
   // trade any more, so it leaves My accounts and goes to the record. The verdict is written down
   // the first time it is noticed, so the date is when it happened, not when you next looked.
+  // Whether an account is finished is never decided here. Opening the funded account is you
+  // saying it passed; a breach is only ever a question, because a fat-fingered figure looks
+  // exactly like a blown account and closing one on that would be unrecoverable.
   function acctEnded(a){
     if(!a) return null;
     if(a.ended) return a.ended;
     if(a.fundedId){
-      a.ended={how:'passed', at:a.passedAt||new Date().toISOString()};
-      saveAccounts(); return a.ended;
-    }
-    const dd = planRulesFor(a).maxdd;
-    if(acctProfit(a) <= -(a.size * ((dd==null?6:dd)/100))){
-      a.ended={how:'breached', at:new Date().toISOString()};
+      a.ended={how:'passed', at:a.passedAt||new Date().toISOString(), by:'you'};
       saveAccounts(); return a.ended;
     }
     return null;
+  }
+  // the condition, not the verdict
+  function breachRoom(a){
+    const dd = planRulesFor(a).maxdd;
+    return acctProfit(a) + (a.size * ((dd==null?6:dd)/100));   // negative once it is through
+  }
+  // Deleting the trade that blew an account puts the account back. A breach is a reading of the
+  // trades; when the trades no longer say it, the reading does not stand. Passing and closing by
+  // hand are decisions about the account itself, so those stay put.
+  function syncBreaches(){
+    let n=0;
+    accounts.forEach(a=>{
+      if(a.ended && a.ended.how==='breached' && breachRoom(a) > 0){
+        delete a.ended; a.breachNoAt=undefined; n++;
+      }
+    });
+    if(n) saveAccounts();
+    return n;
+  }
+  function looksBreached(a){
+    if(!a || a.ended) return false;
+    if(breachRoom(a) > 0) return false;
+    // dismissed at a given depth — ask again only if it gets worse than when you said no
+    return !(a.breachNoAt!=null && acctProfit(a) >= a.breachNoAt);
   }
   const openAccounts  = () => accounts.filter(a=>!acctEnded(a));
   const endedAccounts = () => accounts.filter(a=>!!acctEnded(a));
@@ -1862,7 +1904,8 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const m=new Map();
     for(const t of list){ const k=jAcct(t); if(!m.has(k)) m.set(k,[]); m.get(k).push(t); }
     return [...m.entries()]
-      .map(([id,ts])=>({id, ts, name:acctTitle(id,ts[0]), sub:acctSub(id), cur:id===activeAcctId}))
+      .map(([id,ts])=>({id, ts, name:acctTitle(id,ts[0]), sub:acctSub(id), cur:id===activeAcctId,
+                        firm:(acctById(id) ? acctFirm(acctById(id)) : firmOf(ts[0])) || ''}))
       .sort((a,b)=> (b.cur?1:0)-(a.cur?1:0) || a.name.localeCompare(b.name));
   }
   function renderJournalFilter(){
@@ -2328,7 +2371,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     if(!open.length){ $('dLive').innerHTML=''; renderFeedBar(); return; }
     const groups = groupByAcct(open);
     $('dLive').innerHTML = groups.map(g=>
-      (groups.length>1 ? '<div class="ohead '+(g.cur?'cur':'')+'">'+esc(g.name)+'<span class="gsub">'+esc(g.sub)+'</span></div>' : '')
+      (groups.length>1 ? '<div class="ohead f-'+g.firm+' '+(g.cur?'cur':'')+'">'+esc(g.name)+'<span class="gsub">'+esc(g.sub)+'</span></div>' : '')
       + g.ts.map(liveRow).join('')).join('');
     wireLive();
     renderFeedBar();
@@ -2579,6 +2622,8 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   let settling = null;   // the trade being verified before it enters the record
 
   function renderJournal(){
+    // the trades changed, so a breach read off them may no longer stand
+    if(syncBreaches()) renderAccounts();
     renderJournalFilter();
     const scoped = scopedJournal();
 
@@ -2588,7 +2633,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     $('jOpenCard').hidden = open.length===0;
     const og = groupByAcct(open);
     $('jOpen').innerHTML = og.map(g=>'<div class="ogroup">'+
-      (og.length>1 ? '<div class="ohead '+(g.cur?'cur':'')+'">'+esc(g.name)+'<span class="gsub">'+esc(g.sub)+'</span></div>' : '')+
+      (og.length>1 ? '<div class="ohead f-'+g.firm+' '+(g.cur?'cur':'')+'">'+esc(g.name)+'<span class="gsub">'+esc(g.sub)+'</span></div>' : '')+
       g.ts.map(openRow).join('')+'</div>').join('');
     $('jOpen').querySelectorAll('[data-settle]').forEach(b=>b.addEventListener('click',()=>
       openSettle(+b.dataset.settle, b.dataset.how)));
@@ -2604,7 +2649,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const cg = groupByAcct(closed);
     const tb=$('jrnTable').querySelector('tbody');
     tb.innerHTML = cg.map(g=>
-      (cg.length>1 ? '<tr class="ghead '+(g.cur?'cur':'')+'"><td colspan="8">'+esc(g.name)+
+      (cg.length>1 ? '<tr class="ghead f-'+g.firm+' '+(g.cur?'cur':'')+'"><td colspan="8">'+esc(g.name)+
                      '<span class="gsub">'+esc(g.sub)+' · '+g.ts.length+' trade'+(g.ts.length===1?'':'s')+'</span></td></tr>' : '')
       + g.ts.map(closedRow).join('')).join('');
     $('jrnEmpty').hidden = closed.length>0;
@@ -3416,28 +3461,27 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   // to the selected account — that belongs to the Pre-Trade Check, which is about one trade.
   function renderDash(){ renderOverview(); renderHoldings(); renderPast(); }
 
-  // The record. An account leaves My accounts when it is finished, and what it did lands here.
+
+  // The record: one row per account you are done with. It sits under the trades because that is
+  // what it is a summary of, so it stays a summary — outcome, when, and what it came to.
   function renderPast(){
-    const card=$('dPastCard'), box=$('dPast'); if(!card||!box) return;
+    const card=$('dPastCard'), tb=$('dPast') && $('dPast').querySelector('tbody');
+    if(!card||!tb) return;
     const past=endedAccounts();
     card.hidden = !past.length;
     $('dPastCount').textContent = past.length ? ': '+past.length : '';
-    if(!past.length){ box.innerHTML=''; return; }
-    const WORD = {passed:'PASSED', breached:'BREACHED', closed:'CLOSED'};
-    box.innerHTML = past
+    if(!past.length){ tb.innerHTML=''; return; }
+    const WORD = {passed:'Passed', breached:'Breached', closed:'Closed'};
+    tb.innerHTML = past
       .slice().sort((x,y)=>Date.parse(acctEnded(y).at||0)-Date.parse(acctEnded(x).at||0))
       .map(a=>{
         const e=acctEnded(a), r=acctResult(a);
-        const chip='<span class="stagechip '+e.how+'">'+WORD[e.how]+'</span>';
-        return '<div class="hold past '+e.how+'">'+
-          '<b>'+esc(acctName(a))+(isPaperAcct(a)?'<span class="paperbadge">PAPER</span>':'')+chip+'</b>'+
-          '<span class="meta">'+(a.stage==='funded'?'funded':'evaluation')+' · '+fmt$(a.size)+
-            ' · '+esc(tzDateTime(Date.parse(e.at||Date.now())))+'</span>'+
-          '<span class="pastpl '+(r.net>=0?'pos':'neg')+'">'+fmt$2(r.net)+
-            '<i>'+(r.n ? 'net over '+r.n+' trade'+(r.n===1?'':'s')+' · '+fmt$2(r.gross)+
-                        ' gross less '+fmt$2(r.fees)+' in costs'
-                       : 'no trades logged against it')+'</i></span>'+
-        '</div>';
+        return '<tr><td>'+esc(acctName(a))+
+            (isPaperAcct(a)?' <span class="paperbadge">P</span>':'')+'</td>'+
+          '<td class="'+(e.how==='passed'?'pos':e.how==='breached'?'neg':'')+'">'+WORD[e.how]+'</td>'+
+          '<td>'+esc(tzDateTime(Date.parse(e.at||Date.now())))+'</td>'+
+          '<td>'+r.n+'</td>'+
+          '<td class="'+(r.net>=0?'pos':'neg')+'">'+fmt$2(r.net)+'</td></tr>';
       }).join('');
   }
 
@@ -4149,8 +4193,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     if(d.scrollIntoView) d.scrollIntoView({block:'center', behavior:'smooth'});
   });
   ['cMaxTrades','cUsePct'].forEach(id=>$(id).addEventListener('input',renderChecker));
-  $('cFill').addEventListener('change',()=>{
-    if($('cEnteredAt')) $('cEnteredAt').value = fillStyle().entry;   // follow the plan until overridden
+  $('cEnteredAt').addEventListener('change',()=>{
     renderChecker(); debounced();
   });
 
@@ -4184,7 +4227,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       sym:lastPlanned.sym, dir:lastPlanned.dir, risk:Math.round(lastPlanned.risk*100)/100,
       pl:0, acct:(a?a.size:+$('acct').value), acctLabel:(a?a.label:null), status:'open',
       paper: a ? isPaperAcct(a) : paperOn(), plat:$('cPlat').value, firm:FIRM_KEY,
-      fill: fillKeyFor($('cEnteredAt').value, fillStyle().target),
+      fill: fillKeyFor(entryFillNow(), 'maker'),
       entry:lastPlanned.entry, stop:lastPlanned.stop, target:lastPlanned.tgt,
       units:lastPlanned.units, plannedR:lastPlanned.netR, plannedGrossR:lastPlanned.grossRR, plannedFees:lastPlanned.fees,
       allInLoss:lastPlanned.allInLoss,
@@ -4241,14 +4284,17 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     renderFillHint();
   }
 
+  // The only fill you choose is the entry. The target rests on the book and the stop crosses it,
+  // so those price themselves — this says what the choice you do have is worth.
   function renderFillHint(){
-    const el=$('cFillHint'); if(!el) return;
-    const f=fillStyle();
+    const el=$('cEnteredAt'); if(!el) return;
     const mk=commRate('maker'), tk=commRate('taker');
-    el.innerHTML = mk<tk
-      ? 'Maker <strong>'+(mk*100).toFixed(3)+'%</strong> vs taker <strong>'+(tk*100).toFixed(3)+'%</strong> at '+esc(FIRM.name)+
-        ' — resting a limit order costs <strong>'+(tk/mk).toFixed(1)+'× less</strong>. A stop always fills at taker, whatever you pick here.'
-      : esc(FIRM.name)+' charges the same <strong>'+(tk*100).toFixed(3)+'%</strong> whether you rest an order or cross the book, so this only changes the slippage you should expect, not the fee.';
+    el.title = mk<tk
+      ? 'How you got in. Maker '+(mk*100).toFixed(3)+'% vs taker '+(tk*100).toFixed(3)+'% at '+FIRM.name+
+        ' — resting a limit order costs '+(tk/mk).toFixed(1)+'× less to enter. Your target rests too, '+
+        'so it is charged maker; a stop always crosses the book and is charged taker.'
+      : 'How you got in. '+FIRM.name+' charges the same '+(tk*100).toFixed(3)+'% whether you rest an '+
+        'order or cross the book, so this changes the slippage you should expect, not the fee.';
   }
 
   // one sentence describing what this firm charges you to hold a position
@@ -4412,7 +4458,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   const FIELD_IDS = Object.keys(DEFAULTS);
   // cEntry is saved too: a price you typed is yours until the trading day rolls, at which
   // point seedEntry replaces it with the live one rather than leaving yesterday's number.
-  const EXTRA_IDS = ['cFill','cPlat','cHold','cMaxTrades','cUsePct','cSym','cEntry','cStop','cTarget','cReplayWhen'];
+  const EXTRA_IDS = ['cEnteredAt','cPlat','cHold','cMaxTrades','cUsePct','cSym','cEntry','cStop','cTarget','cReplayWhen'];
   function saveState(){
     try{
       const s={}; FIELD_IDS.forEach(id=>s[id]=$(id).value);
