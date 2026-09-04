@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="068e5b0 · 4 Sept 2026, 13:00">
+<meta name="build" content="959a564 · 4 Sept 2026, 13:19">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}html[data-theme="light"]{color-scheme:light}html[data-theme="light"] body{background:#f4f6f8}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -230,6 +230,8 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   td:first-child{font-family:"IBM Plex Sans",sans-serif}
   tr:last-child td{border-bottom:none}
   td.pos{color:var(--good)} td.neg{color:var(--bad)}
+  #dPast tfoot td{font-weight:600; border-top:1px solid var(--border-strong); border-bottom:none}
+  #dPast tfoot td:first-child{text-align:left; color:var(--sub)}
   .recpick{border:1px solid var(--accent); background:rgba(240,162,50,.08); border-radius:10px;
            padding:16px 18px; margin-bottom:14px}
   .recpick.cold{border-color:var(--bad); background:rgba(230,103,103,.08)}
@@ -260,9 +262,9 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   .ctxbar{background:var(--inset); border:1px solid var(--border); border-left:3px solid var(--accent);
           border-radius:8px; padding:10px 14px; font-size:12.5px; color:var(--sub)}
   .ctxbar strong{color:var(--ink); font-family:"IBM Plex Mono",monospace; font-weight:600}
-  .paperbadge{display:inline-block; background:var(--line); color:#fff; font-family:"IBM Plex Mono",monospace;
+  .paperbadge{display:inline-block; background:var(--line); color:#111a24; font-family:"IBM Plex Mono",monospace;
     font-size:10px; font-weight:600; letter-spacing:.08em; padding:2px 6px; border-radius:4px; vertical-align:1px}
-  .acctrow .pick .paperbadge{margin-left:6px}
+  .acctrow .pick .paperbadge{margin-left:6px; color:#111a24; font-size:10px}
   .acctrow .pick .stagechip{display:inline-block; margin-left:6px; padding:1px 5px; border-radius:4px;
     font-family:"IBM Plex Mono",monospace; font-size:9.5px; font-weight:700; letter-spacing:.08em;
     vertical-align:1px; border:1px solid var(--line); color:var(--muted)}
@@ -1121,6 +1123,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       <div class="jbar">
         <span class="lbl">Showing</span>
         <select id="jFilter"><option value="all">All accounts</option></select>
+        <label class="toggle" id="jPaperWrap"><input type="checkbox" id="jPaper" checked>Include paper</label>
         <span class="hint" id="jFilterHint" style="margin:0"></span>
       </div>
 
@@ -1191,13 +1194,14 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
 
       <div class="card" id="dPastCard" hidden>
         <h3>Closed accounts<span id="dPastCount"></span></h3>
-        <p class="sub">What each account you have finished with did. P/L is what it made on the
-          chart; Cash is what it was actually worth — an evaluation costs its fee and pays nothing,
-          because passing one buys a funded account rather than money, and a funded account is
-          worth what you have withdrawn from it.</p>
+        <p class="sub">What each account you have finished with came to in money. An evaluation
+          costs its fee and pays nothing, because passing one buys a funded account rather than
+          cash; a funded account is worth what was withdrawn from it. Paper accounts cost and pay
+          nothing and are kept so the record is complete. The total counts live accounts only.</p>
         <div style="overflow-x:auto"><table id="dPast">
-          <thead><tr><th>Account</th><th>Outcome</th><th>Closed</th><th>Trades</th><th>P/L</th><th>Cash</th></tr></thead>
+          <thead><tr><th>Account</th><th>Outcome</th><th>Closed</th><th>Trades</th><th>Net P/L</th></tr></thead>
           <tbody></tbody>
+          <tfoot></tfoot>
         </table></div>
       </div>
 
@@ -1641,7 +1645,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
         renderJournal(); renderJournalStats(); renderLive();
         toast('Closed '+acctName(a), journal.some(t=>jAcct(t)===id)
-          ? 'Its record is on the Dashboard under Closed accounts.' : 'It had no trades, so nothing was kept.');
+          ? 'Its record is in the Journal under Closed accounts.' : 'It had no trades, so nothing was kept.');
       }));
     }
     renderDash();
@@ -1924,7 +1928,10 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     if(v==='none') return jAcct(t)===null;
     return jAcct(t)===+v;
   }
-  const inScope = t => scopeMatch(jScope(), t);
+  // Paper trades can be put away while every account is listed. A single account shows whatever
+  // it is, so the switch only has a job on All accounts and is hidden otherwise.
+  const jPaperOn = () => { const el=$('jPaper'); return el ? el.checked : true; };
+  const inScope = t => scopeMatch(jScope(), t) && (jScope()!=='all' || jPaperOn() || !isPaperTrade(t));
   // Your numbers has its own picker on the Dashboard. It is deliberately not the Journal's
   // filter: one narrows a table you are reading, the other asks whose record you want.
   const statsScope  = () => { const el=$('jStatsScope'); return el ? el.value : 'all'; };
@@ -1975,8 +1982,10 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     sel.innerHTML=html;
     sel.value = [...sel.options].some(o=>o.value===keep) ? keep : 'all';
     $('jFilterHint').textContent = sel.value==='all'
-      ? 'Every account, grouped separately. Pick one to see its record on its own.'
-      : 'This account only — the stats below are its record alone.';
+      ? (jPaperOn() ? 'Every account, grouped separately. Pick one to see its record on its own.'
+                    : 'Live accounts only, grouped separately. Paper trades are put away.')
+      : 'This account only.';
+    const pw=$('jPaperWrap'); if(pw) pw.hidden = sel.value!=='all';
     // the manual-entry account picker
     const m=$('jAcctSel'), mk=m.value;
     // the tag is what tells two accounts on the same plan apart — without it the paper one and
@@ -3521,25 +3530,32 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const past=endedAccounts();
     card.hidden = !past.length;
     $('dPastCount').textContent = past.length ? ': '+past.length : '';
-    if(!past.length){ tb.innerHTML=''; return; }
+    const tf=$('dPast').querySelector('tfoot');
+    if(!past.length){ tb.innerHTML=''; if(tf) tf.innerHTML=''; return; }
     const WORD = {passed:'Passed', breached:'Breached', closed:'Closed'};
+    const money = n => '<td class="'+(n>0?'pos':n<0?'neg':'')+'"';
+    // Net P/L is money, not chart profit: an eval costs its fee and pays nothing, a funded
+    // account paid out what was withdrawn. Paper costs and pays nothing and shows exactly that.
     tb.innerHTML = past
       .slice().sort((x,y)=>Date.parse(acctEnded(y).at||0)-Date.parse(acctEnded(x).at||0))
       .map(a=>{
-        const e=acctEnded(a), r=acctResult(a);
-        const cash=acctCash(a);
+        const e=acctEnded(a), r=acctResult(a), net=acctCash(a)||0;
         return '<tr><td>'+esc(acctName(a))+
             (isPaperAcct(a)?' <span class="paperbadge">P</span>':'')+'</td>'+
           '<td class="'+(e.how==='passed'?'pos':e.how==='breached'?'neg':'')+'">'+WORD[e.how]+'</td>'+
           '<td>'+esc(tzDateTime(Date.parse(e.at||Date.now())))+'</td>'+
           '<td>'+r.n+'</td>'+
-          '<td class="'+(r.net>=0?'pos':'neg')+'">'+fmt$2(r.net)+'</td>'+
-          '<td class="'+(cash>0?'pos':cash<0?'neg':'')+'" title="'+
-            (isPaperAcct(a) ? 'Paper — nothing was spent or paid'
-             : a.stage==='funded' ? 'Withdrawn from this funded account'
-             : 'The eval fee. Profit inside an evaluation is not money.')+'">'+
-            (cash===0 ? '—' : fmt$2(cash))+'</td></tr>';
+          money(net)+' title="'+
+            (a.stage==='funded' ? 'Everything withdrawn from this funded account.'
+             : 'The eval fee. Profit inside an evaluation is not money.')+
+            (isPaperAcct(a) ? ' Paper, so nothing real changed hands.' : '')+'">'+
+            fmt$2(net)+'</td></tr>';
       }).join('');
+    // what it has all come to in real money; paper is listed but never adds to it
+    const live=past.filter(a=>!isPaperAcct(a));
+    const total=live.reduce((x,a)=>x+acctCash(a),0)||0;
+    if(tf) tf.innerHTML='<tr><td colspan="4">Total, live accounts'+
+      (live.length<past.length ? ' \u2014 paper not counted' : '')+'</td>'+money(total)+'>'+fmt$2(total)+'</td></tr>';
   }
 
   function renderOverview(){
@@ -4532,6 +4548,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     if($('useTracked').checked){ applyTracked(); debounced(); }
   });
   $('jFilter').addEventListener('change',()=>{ renderJournal(); renderJournalStats(); });
+  $('jPaper').addEventListener('change',()=>{ renderJournal(); renderJournalStats(); saveState(); });
   $('jManualToggle').addEventListener('click',()=>{
     const f=$('jManualForm');
     f.hidden=!f.hidden;
@@ -4582,6 +4599,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       s.autoRisk = $('autoRisk').checked;
       s.paperMode = $('paperMode').checked;
       s.jStatsPaper = $('jStatsPaper').checked;
+      s.jPaper = $('jPaper').checked;
       s.cReplay = $('cReplay').checked;
       s.jStatsScope = $('jStatsScope').value;
       s.firm = FIRM_KEY;
@@ -4600,6 +4618,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     if(s.plan==='paper'){ $('plan').value='classic'; $('paperMode').checked=true; }
     else $('paperMode').checked = !!s.paperMode;
     $('jStatsPaper').checked = s.jStatsPaper!==false;      // paper counts unless you turned it off
+    $('jPaper').checked = s.jPaper!==false;
     $('cReplay').checked = !!s.cReplay;
     if(s.jStatsScope) $('jStatsScope').dataset.want = s.jStatsScope;
     updateFee();
