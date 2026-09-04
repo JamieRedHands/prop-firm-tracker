@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="ee074fb · 4 Sept 2026, 14:20">
+<meta name="build" content="b28a01f · 4 Sept 2026, 14:34">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}html[data-theme="light"]{color-scheme:light}html[data-theme="light"] body{background:#f4f6f8}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -127,6 +127,9 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   .duo input[type=number]{width:84px; flex:none}
   input:focus-visible, select:focus-visible, textarea:focus-visible{outline:2px solid var(--focus); outline-offset:1px}
   input.badtime{border-color:var(--bad)}
+  .dt{display:flex; gap:8px}
+  .dt input[type=date]{flex:1; min-width:0}
+  .dt .dttime{width:84px; flex:none}
   input:disabled, select:disabled{opacity:.5; cursor:not-allowed}
   .grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
   .grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:10px}
@@ -992,7 +995,9 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         </div>
         <div class="field" id="cReplayWhenField" hidden style="margin-bottom:10px">
           <label><span class="lbl">Opened at</span></label>
-          <input type="text" id="cReplayWhen" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="dd/mm/yyyy hh:mm" title="Day first, 24-hour clock, e.g. 05/02/2023 23:00">
+          <div class="dt"><input type="date" id="cReplayWhenDate" aria-label="Date">
+            <input type="text" id="cReplayWhenTime" class="dttime" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="hh:mm" maxlength="5" aria-label="Time, 24-hour clock" title="24-hour clock: 2300 becomes 23:00">
+            <input type="hidden" id="cReplayWhen"></div>
           <div class="hint">The date and time on the replay chart, not the clock on the wall. Everything
             that counts by day — the daily loss limit, the trades-per-day budget — uses this.</div>
         </div>
@@ -1230,7 +1235,6 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   function replayWhenMs(){
     const el=$('cReplayWhen'); if(!el) return Date.now();
     const v = el.value ? tzParse(el.value) : NaN;
-    el.classList.toggle('badtime', !!el.value && isNaN(v));
     if(!isNaN(v)){ el.dataset.ms=String(v); return v; }
     // half-typed: hold the last time that made sense rather than jumping to today
     return el.dataset.ms ? +el.dataset.ms : Date.now();
@@ -2177,9 +2181,44 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   }
   const dtLocal = d => { const p=tzParts(typeof d==='number'?d:d.getTime());
                          return p.year+'-'+p.month+'-'+p.day+'T'+p.hour+':'+p.minute; };
-  // the same moment the way it is typed into the boxes: day first, 24-hour clock
-  const dtShow  = d => { const p=tzParts(typeof d==='number'?d:d.getTime());
-                         return p.day+'/'+p.month+'/'+p.year+' '+p.hour+':'+p.minute; };
+  // A date-and-time control: the date picker you click through (it follows your own date
+  // format), a typed 24-hour time where 2300 becomes 23:00, and a hidden field holding the
+  // combined ISO value that the rest of the code reads and the saves keep.
+  function normTime(v){
+    const t=String(v||'').trim(); if(!t) return '';
+    let h, mi, m=/^(\d{1,2})[:.](\d{1,2})$/.exec(t);
+    if(m){ h=+m[1]; mi=+m[2]; }
+    else{ const g=t.replace(/\D/g,''); if(!g || g.length>4) return null;
+          if(g.length<=2){ h=+g; mi=0; } else { h=+g.slice(0,-2); mi=+g.slice(-2); } }
+    if(h>23||mi>59) return null;
+    return String(h).padStart(2,'0')+':'+String(mi).padStart(2,'0');
+  }
+  function dtRead(id){
+    const hid=$(id), dEl=$(id+'Date'), tEl=$(id+'Time');
+    if(!hid) return '';
+    if(!dEl||!tEl) return hid.value;
+    const tm=normTime(tEl.value);
+    tEl.classList.toggle('badtime', tEl.value.trim()!=='' && tm===null);
+    hid.value = (dEl.value && tm) ? dEl.value+'T'+tm : '';
+    return hid.value;
+  }
+  function dtWrite(id, ms){
+    const hid=$(id), dEl=$(id+'Date'), tEl=$(id+'Time'); if(!hid) return;
+    const v = (ms==null || isNaN(ms)) ? '' : dtLocal(ms);
+    hid.value=v; if(dEl) dEl.value=v.slice(0,10);
+    if(tEl){ tEl.value=v.slice(11,16); tEl.classList.remove('badtime'); }
+  }
+  // whatever the hidden field holds - an older save in any form tzParse reads - shown in the parts
+  function dtSync(id){ const hid=$(id); if(!hid) return; dtWrite(id, hid.value ? tzParse(hid.value) : null); }
+  // the date commits when picked; the time commits when you leave its box or press Enter and is
+  // tidied to hh:mm - nothing is read while you are still typing it
+  function dtWire(id, onCommit){
+    const dEl=$(id+'Date'), tEl=$(id+'Time'); if(!dEl||!tEl) return;
+    const go=()=>{ dtRead(id); onCommit(); };
+    dEl.addEventListener('change', go);
+    tEl.addEventListener('blur', ()=>{ const tm=normTime(tEl.value); if(tm) tEl.value=tm; go(); });
+    tEl.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); tEl.blur(); } });
+  }
   const tzTime = ms => { const p=tzParts(ms); return p.hour+':'+p.minute; };
   // Stored dates stay ISO — that is what sorts and compares correctly. These are for reading.
   const showDay = iso => { const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||''));
@@ -2369,7 +2408,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const lvl = t.alerted==='target' ? +t.target : t.alerted==='stop' ? +t.stop : 0;
     if(t.alerted && lvl>0){
       return {px:lvl, kind: t.alerted==='target' ? 'maker' : 'taker',
-              ms: t.alertAt ? Date.parse(t.alertAt) : costClock(t), locked:true};
+              ms: t.replay ? costClock(t) : (t.alertAt ? Date.parse(t.alertAt) : Date.now()), locked:true};
     }
     const px = markFor(t);
     return px==null ? null : {px, kind:'taker', ms:costClock(t), locked:false};
@@ -2446,7 +2485,9 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     let structural=false, moved=false;
     openTrades().forEach(t=>{
       if(noteBest(t)) moved=true;
-      if(checkLevels(t)) structural=true;
+      // a typed price only changes when you type again, and is checked when you commit it -
+      // rechecking it every tick would bring back an alert you had just dismissed
+      if(liveMode(t)==='live' && checkLevels(t)) structural=true;
     });
     if(structural){ saveJournal(); renderLive(); }
     else { if(moved) saveJournal(); openTrades().forEach(refreshLive); }
@@ -2476,16 +2517,18 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     host.dataset.wired='1';
     const tradeOf = el => journal.find(x=>x.id===+el.dataset.id || x.id===+el.dataset.pin ||
                                           x.id===+el.dataset.unpin || x.id===+el.dataset.clearalert);
-    host.addEventListener('input', e=>{
+    // A price is yours until you leave the box: nothing reads it keystroke by keystroke, so 225
+    // on the way to 22500 cannot trip the target. Enter commits it the same as clicking away.
+    host.addEventListener('keydown', e=>{
+      const inp=e.target.closest('.lmark'); if(!inp) return;
+      if(e.key==='Enter'){ e.preventDefault(); inp.blur(); }
+    });
+    host.addEventListener('change', e=>{
       const inp=e.target.closest('.lmark'); if(!inp) return;
       const t=tradeOf(inp); if(!t) return;
       t.mark = inp.value===''? null : +inp.value;
       refreshLive(t);
-    });
-    host.addEventListener('change', e=>{
-      const inp=e.target.closest('.lmark'); if(!inp) return;
-      const t=tradeOf(inp);
-      const hit = t ? checkLevels(t) : false;
+      const hit = checkLevels(t);
       saveJournal();
       if(hit) renderLive();
     });
@@ -2504,7 +2547,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
 
   function hwmTitle(t, px){
     if(px==null) return 'High watermark';
-    const c=settleCalc(t, px, Date.now(), 'taker');
+    const c=settleCalc(t, px, costClock(t), 'taker');
     return 'High watermark — '+fmt$2(c.gross)+' before costs, at '+px6(px);
   }
   function liveRow(t){
@@ -2617,12 +2660,12 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   function alertBanner(t){
     if(!t.alerted) return '';
     const tgt = t.alerted==='target';
-    const when = t.alertAt ? tzTime(Date.parse(t.alertAt)) : '';
+    const when = (t.alertAt && !t.replay) ? tzTime(Date.parse(t.alertAt)) : '';   // wall time means nothing in replay
     let worth='';
     if(priceable(t)){
       const lvl = tgt ? +t.target : +t.stop;
       if(lvl>0){
-        const c = settleCalc(t, lvl, Date.now(), tgt ? 'maker' : 'taker');
+        const c = settleCalc(t, lvl, costClock(t), tgt ? 'maker' : 'taker');
         worth = ' — filling there moves <b>'+fmt$2(c.gross)+'</b> ('+(c.Rg>=0?'+':'')+c.Rg.toFixed(2)+
                 'R), less <b>'+fmt$2(c.fees)+'</b> of costs, netting <b>'+fmt$2(c.net)+'</b> ('+
                 (c.R>=0?'+':'')+c.R.toFixed(2)+'R)';
@@ -2805,7 +2848,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const filledAt = hit ? Date.parse(t.alertAt)
                    : t.replay ? Math.max(opened, replayOn() ? replayWhenMs() : opened)
                    : Date.now();
-    settling = {id, how, exit:px||'', when:dtShow(filledAt), override:''};
+    settling = {id, how, exit:px||'', when:dtLocal(filledAt), override:''};
     // the panel lives on the Journal tab, so bring it into view wherever it was triggered from
     showView('view-jrn');
     renderJournal(); renderJournalStats();
@@ -2834,7 +2877,9 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
           : '')+
         (can
           ? '<div class="field"><label><span class="lbl">Closed at</span></label>'+
-            '<input type="text" id="sWhen" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="dd/mm/yyyy hh:mm" title="Day first, 24-hour clock, e.g. 05/02/2023 23:00" value="'+settling.when+'"></div>'
+            '<div class="dt"><input type="date" id="sWhenDate" aria-label="Date" value="'+settling.when.slice(0,10)+'">'+
+            '<input type="text" id="sWhenTime" class="dttime" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="hh:mm" maxlength="5" aria-label="Time, 24-hour clock" title="24-hour clock: 2300 becomes 23:00" value="'+settling.when.slice(11,16)+'">'+
+            '<input type="hidden" id="sWhen" value="'+settling.when+'"></div></div>'
           : '')+
         '<div class="field"><label><span class="lbl">Broker P/L $</span></label>'+
         '<input type="number" id="sOverride" step="any" value="'+settling.override+'" placeholder="'+
@@ -2857,6 +2902,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       if(id==='sOverride') settling.override=el.value;
       renderSettleBody();
     }); });
+    dtWire('sWhen', ()=>{ settling.when=$('sWhen').value; renderSettleBody(); });
     $('sCancel').addEventListener('click',()=>{ settling=null; renderJournal(); });
     $('sConfirm').addEventListener('click', confirmSettle);
     renderSettleBody();
@@ -2911,8 +2957,8 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const ov = ovRaw!=='' && !isNaN(+ovRaw) ? +ovRaw : null;
     if(priceable(t)){
       const px=+$('sExit').value||0;
-      const whenRaw=$('sWhen').value.trim(), ms=whenRaw ? tzParse(whenRaw) : Date.now();
-      if(isNaN(ms)){ $('sMsg').textContent='Closed at needs a day-first date and 24-hour time, like 05/02/2023 23:00.'; return; }
+      const whenRaw=dtRead('sWhen'), ms=whenRaw ? tzParse(whenRaw) : NaN;
+      if(isNaN(ms)){ $('sMsg').textContent='Closed at needs a date and a 24-hour time, like 23:00.'; return; }
       if(!(px>0) && ov==null){ $('sMsg').textContent='Enter the exit price, or the P/L your broker shows.'; return; }
       if(px>0){
         const c=settleCalc(t,px,ms, settling.how==='win' ? 'maker' : 'taker');
@@ -4367,10 +4413,10 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const on=replayOn();
     $('cReplayWhenField').hidden = !on;
     // opening the box empty and stamping "now" silently would be worse than showing the clock
-    if(on && !$('cReplayWhen').value) $('cReplayWhen').value = dtShow(Date.now());
+    if(on && !$('cReplayWhen').value) dtWrite('cReplayWhen', Date.now());
     syncCheckerToday(); renderChecker(); saveState();     // Account state is about a different moment now
   });
-  $('cReplayWhen').addEventListener('input',()=>{ syncCheckerToday(); renderChecker(); });
+  dtWire('cReplayWhen', ()=>{ syncCheckerToday(); renderChecker(); saveState(); });
   ['jStatsScope','jStatsPaper'].forEach(id=>$(id).addEventListener('change',()=>{
     renderJournalStats(); saveState();
   }));
@@ -4703,6 +4749,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     renderFirmUI();
     FIELD_IDS.forEach(id=>{ if(s[id]!=null) $(id).value=s[id]; });
     EXTRA_IDS.forEach(id=>{ if(s[id]!=null && $(id)) $(id).value=s[id]; });
+    dtSync('cReplayWhen');            // a saved time shows in the picker and the time box, never raw
     ['winRate','rr','risk'].forEach(id=>{ $(id+'N').value=$(id).value; showPair(id); });
     $('useTracked').checked = !!s.useTracked;
     $('trackedPaper').checked = !!s.trackedPaper;
