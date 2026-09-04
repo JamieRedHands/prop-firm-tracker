@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build" content="de5ddb5 · 4 Sept 2026, 11:34">
+<meta name="build" content="17bb5a8 · 4 Sept 2026, 12:09">
 <meta name="description" content="Position sizing, rule checks and a trade journal for prop-firm evaluations, with live prices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%93%88</text></svg>">
 <style>*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0e1216;font:14px system-ui,sans-serif}html[data-theme="light"]{color-scheme:light}html[data-theme="light"] body{background:#f4f6f8}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -282,6 +282,12 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   .breachask .btn{font-size:11.5px; padding:6px 10px}
   .paperbtn{display:inline-block; margin-top:7px; padding:6px 13px; font-size:12px}
   .firmsel{width:auto; flex:none; font-size:11px; padding:4px 6px; border-color:var(--accent)}
+  /* the panel reads itself off the journal, so its boxes are readouts, not inputs */
+  .panel input[readonly]{background:var(--inset); color:var(--ink); border-color:var(--border);
+    cursor:default}
+  .panel input[readonly]:focus{outline:none; border-color:var(--border)}
+  .asday{float:right; font-family:"IBM Plex Mono",monospace; font-size:10.5px; font-weight:500;
+    letter-spacing:.04em; color:var(--muted); text-transform:none}
   .papersw{display:flex; align-items:center; gap:4px; font-size:10.5px; color:var(--muted);
     font-family:"IBM Plex Mono",monospace; letter-spacing:.06em; cursor:pointer; user-select:none}
   .papersw input{margin:0; accent-color:var(--accent); cursor:pointer}
@@ -1001,31 +1007,28 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       </div>
 
       <div class="panel">
-        <h2>Account state</h2>
+        <h2>Account state<span class="asday" id="cStateDay"></span></h2>
         <div class="field">
-          <label><span class="lbl">Trading account</span></label>
-          <select id="cAcctSel"></select>
-          <div class="hint" id="cAcctHint">Open an account on the New Eval tab to list it here.</div>
+          <label><span class="lbl">Balance at the day's roll $</span></label>
+          <input type="number" id="cDayStart" readonly>
+          <div class="hint" id="cDayStartHint">The account size plus everything closed before this
+            trading day. The daily loss limit is measured from it.</div>
         </div>
         <div class="field">
-          <label><span class="lbl">Balance at 00:30 UTC $</span></label>
-          <input type="number" id="cDayStart" min="0" step="1" value="25000">
-          <div class="hint">The daily equity limit is locked to this for the next 24h.</div>
-        </div>
-        <div class="field">
-          <label><span class="lbl">Realized P/L today $</span></label>
-          <input type="number" id="cToday" step="1" value="0">
-          <div class="hint" id="cTodayHint">Negative if you're down. Journal fills this automatically.</div>
+          <label><span class="lbl">Realised P/L that day $</span></label>
+          <input type="number" id="cToday" readonly>
+          <div class="hint" id="cTodayHint">-</div>
         </div>
         <div class="field">
           <label><span class="lbl">Floating P/L on open trades $</span></label>
-          <input type="number" id="cFloat" step="1" value="0">
-          <div class="hint">Breakout counts open positions — equity, not balance.</div>
+          <input type="number" id="cFloat" readonly>
+          <div class="hint" id="cFloatHint">Marked at the price each open position is showing.
+            Breakout counts open positions - equity, not balance.</div>
         </div>
         <div class="field">
           <label><span class="lbl">Open risk right now $</span></label>
-          <input type="number" id="cOpen" min="0" step="1" value="0">
-          <div class="hint" id="cOpenHint">What you'd lose if every open position hit its stop.</div>
+          <input type="number" id="cOpen" readonly>
+          <div class="hint" id="cOpenHint">-</div>
         </div>
       </div>
     </div>
@@ -1516,6 +1519,12 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         if(a.plan==='paper'){ a.plan='classic'; a.paper=true; dirty=true; }
         if(a.paper===undefined){ a.paper=false; dirty=true; }
         if(a.firm===undefined){ a.firm=null; dirty=true; }
+        // the split is the account's own, not whatever the New Eval panel says today
+        if(a.split===undefined){
+          const f=FIRMS[a.firm];
+          a.split = f ? f.splits[0][0] : 80; dirty=true;
+        }
+        if(!Array.isArray(a.payouts)){ a.payouts=[]; dirty=true; }
         // a breach was briefly marked automatically; nobody confirmed those, so they are not
         // findings — reopen them and let the account ask
         if(a.ended && a.ended.how==='breached' && !a.ended.by){ delete a.ended; dirty=true; }
@@ -1565,7 +1574,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         return `
         <div class="acctrow ${a.id===activeAcctId?'cur':''} ${a.stage==='funded'?'funded':''} ${ready?'hit':''}">
           <button class="pick" data-pick="${a.id}" title="Use this account for the Pre-Trade Check">
-            <b>${esc(acctName(a))}${isPaperAcct(a)?'<span class="paperbadge">PAPER</span>':''}${chip}</b><span>balance ${fmt$(a.bal)}</span>
+            <b>${esc(acctName(a))}${isPaperAcct(a)?'<span class="paperbadge">PAPER</span>':''}${chip}</b><span>balance ${fmt$(a.bal)}${acctPaidOut(a)? ' · '+fmt$2(acctPaidOut(a))+' withdrawn' : ''}</span>
             ${a.fundedId ? '<span class="acctgoal">passed '+esc(tzDateTime(Date.parse(a.passedAt||Date.now())))+' · funded account opened</span>' : goalLine(g)}
           </button>
           ${acctFirm(a) ? '' : `<select class="firmsel" data-firm="${a.id}" title="Which firm is this account with?">
@@ -1577,6 +1586,9 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
           <button class="del" data-del="${a.id}" title="Close this account — its record is kept on the Dashboard" aria-label="Close account">×</button>
         </div>`
         +(ready ? `<button class="btn win passbtn" data-pass="${a.id}">Passed — open the funded account</button>` : '')
+        +(withdrawable(a) ? `<button class="btn win passbtn" data-withdraw="${a.id}">
+            Withdraw ${fmt$2(payoutOn(a))} — your ${acctSplit(a)}% of ${fmt$2(acctProfitNow(a))}
+          </button>` : '')
         +(looksBreached(a) ? `<div class="breachask">
             <b>Is this account blown?</b>
             <span>Its trades add up to ${fmt$(acctProfit(a))}, which is through the ${fmt$(a.size*((planRulesFor(a).maxdd==null?6:planRulesFor(a).maxdd)/100))} max drawdown. Nothing is closed until you say so.</span>
@@ -1608,6 +1620,16 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       $('acctList').querySelectorAll('[data-pass]').forEach(b=>b.addEventListener('click',()=>{
         const a=acctById(+b.dataset.pass); if(a) promoteToFunded(a);
       }));
+      $('acctList').querySelectorAll('[data-withdraw]').forEach(b=>b.addEventListener('click',()=>{
+        const a=acctById(+b.dataset.withdraw); if(!a || !withdrawable(a)) return;
+        const profit=acctProfitNow(a), split=acctSplit(a), paid=profit*split/100;
+        if(!Array.isArray(a.payouts)) a.payouts=[];
+        a.payouts.push({at:new Date().toISOString(), profit, split, paid});
+        saveAccounts(); renderAccounts(); syncCheckerToday(); renderChecker();
+        renderJournal(); renderJournalStats();
+        toast('Withdrew '+fmt$2(paid)+' from '+acctName(a),
+              'Your '+split+'% of '+fmt$2(profit)+'. The account counts from '+fmt$(a.size)+' again.');
+      }));
       $('acctList').querySelectorAll('[data-breach]').forEach(b=>b.addEventListener('click',()=>{
         const a=acctById(+b.dataset.breach); if(!a) return;
         a.ended={how:'breached', at:new Date().toISOString(), by:'you'};
@@ -1632,21 +1654,6 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
           ? 'Its record is on the Dashboard under Closed accounts.' : 'It had no trades, so nothing was kept.');
       }));
     }
-    // checker dropdown
-    const sel=$('cAcctSel');
-    sel.innerHTML = openList.length
-      ? openList.map(a=>`<option value="${a.id}">${esc(acctName(a))} — ${acctTag(a)}</option>`).join('')
-      : '<option value="">Using the New Eval settings</option>';
-    if(openList.length && activeAcctId!=null) sel.value=String(activeAcctId);
-    const act=activeAccount(), actG=act?acctGoal(act):null;
-    $('cAcctHint').textContent = !openList.length
-      ? 'No accounts open. The checker is using the plan and size set on New Eval.'
-      : (act && act.stage==='eval' && actG.hit && !act.fundedId)
-        ? 'Target reached on '+acctSay(act)+' — open the funded account from My accounts, above.'
-        : (act && actG)
-          ? 'Switch accounts here or in My accounts — the limits below follow it. '+
-            fmt$(actG.made)+' of '+fmt$(actG.need)+' '+actG.what+'.'
-          : 'Switch accounts here or in My accounts — the limits below follow it.';
     renderDash();
   }
 
@@ -1665,7 +1672,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       const plan=$('plan').value, tbl=FEES[plan]||{};
       const size = tbl[10000] ? 10000 : (Object.keys(tbl).map(Number).sort((x,y)=>x-y)[0] || 10000);
       const a={id:Date.now(), label:'Paper '+cap(plan)+' '+fmt$(size), plan, size, bal:size,
-               stage:'eval', paper:true, firm:FIRM_KEY};
+               stage:'eval', paper:true, firm:FIRM_KEY, split:+$('split').value||80, payouts:[]};
       accounts.push(a); activeAcctId=a.id; a.label=acctName(a);
     }
     saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
@@ -1680,7 +1687,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const k=accounts.filter(x=>x.stage==='funded' && x.plan===a.plan && x.size===a.size).length;
     const f={id:Date.now(), label:(isPaperAcct(a)?'Paper ':'')+cap(a.plan)+' '+fmt$(a.size)+' funded'+(k?' #'+(k+1):''),
              plan:a.plan, size:a.size, bal:a.size, stage:'funded', paper:isPaperAcct(a),
-             firm:a.firm||null, fromId:a.id};
+             firm:a.firm||null, fromId:a.id, split:a.split||80, payouts:[]};
     a.passedAt=new Date().toISOString(); a.fundedId=f.id;
     a.ended={how:'passed', at:a.passedAt};       // it stops being tradeable the moment it passes
     accounts.push(f); activeAcctId=f.id; f.label=acctName(f);
@@ -1712,7 +1719,8 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     const plan=$('plan').value, size=+$('acct').value;
     const n=accounts.filter(a=>a.plan===plan && a.size===size).length;
     const label=(paperOn()?'Paper ':'')+cap(plan)+' '+fmt$(size)+(n?' #'+(n+1):'');
-    const a={id:Date.now(), label, plan, size, bal:size, stage:'eval', paper:paperOn(), firm:FIRM_KEY};
+    const a={id:Date.now(), label, plan, size, bal:size, stage:'eval', paper:paperOn(),
+             firm:FIRM_KEY, split:+$('split').value||80, payouts:[]};
     accounts.push(a); activeAcctId=a.id; a.label=acctName(a);
     saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
     renderJournal(); renderJournalStats(); renderLive();
@@ -1792,8 +1800,23 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   const acctProfit = a => journal.reduce((x,t)=>
     x + ((jAcct(t)===a.id && t.status!=='open') ? (+t.pl||0) : 0), 0);
   const planRulesFor = a => (((FIRMS[a.firm]||{}).plans)||PLANS)[a.plan] || PLANS[a.plan] || {};
+  // The split the account was opened on, held to what its firm actually sells.
+  function acctSplit(a){
+    const f=FIRMS[acctFirm(a)];
+    const offered = f ? f.splits.map(x=>x[0]) : [80];
+    const want = +(a && a.split) || offered[0];
+    return offered.includes(want) ? want : offered[0];
+  }
+  const acctPayouts   = a => (a && Array.isArray(a.payouts)) ? a.payouts : [];
+  const acctPaidOut   = a => acctPayouts(a).reduce((x,p)=>x+(+p.paid||0),0);
+  // profit is measured from the last payout, because that is where the account was reset to
+  const acctBanked    = a => acctPayouts(a).reduce((x,p)=>x+(+p.profit||0),0);
+  const acctProfitNow = a => acctProfit(a) - acctBanked(a);
+  const withdrawable  = a => a && a.stage==='funded' && !acctEnded(a) && acctProfitNow(a) > 0;
+  const payoutOn      = a => acctProfitNow(a) * acctSplit(a)/100;
+
   function acctGoal(a){
-    const made = acctProfit(a);
+    const made = a.stage==='funded' ? acctProfitNow(a) : acctProfit(a);
     if(a.stage==='funded'){
       const pct = (+$('payoutTrig').value||5)/100;
       const need = a.size*pct;
@@ -2855,14 +2878,14 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       `. Breakeven win rate at ${s.rr.toFixed(2)}R is ${fmtPct(be)}. R multiples are before costs, the way you'd quote a trade; the money at the end of each row is what landed after them.`;
     const tiles=[
       {k:'Win rate', v:fmtPct(s.winRate), s:`${s.wins}W / ${s.losses}L`, cls:s.winRate>=be?'pos':'neg'},
-      // R:R is avg win over avg loss, and a loss that hits its stop is exactly 1R — so a
-      // separate R:R tile was printing the average win a second time. Show the two averages it
-      // is made of instead, with the ratio underneath the one that is not always 1R.
+      // R:R is the average win over the average loss, and a loss that hits its stop is exactly
+      // 1R — so both a separate R:R tile and a separate average-loss tile were restating this
+      // one. The ratio lives underneath it instead.
       {k:'Avg win', v:'+'+s.avgWinR.toFixed(2)+'R',
-       s:s.wins+' winning trade'+(s.wins===1?'':'s')},
-      {k:'Avg loss', v:s.losses ? '−'+s.avgLossR.toFixed(2)+'R' : '—',
-       s:s.losses ? s.rr.toFixed(2)+'R won per 1R lost, across '+s.losses+' loss'+(s.losses===1?'':'es')
-                  : 'no losing trades yet'},
+       s:s.wins+' winning trade'+(s.wins===1?'':'s')+
+         (s.losses ? ' · '+s.rr.toFixed(2)+'R won per 1R lost, with the average loss at '+
+                     s.avgLossR.toFixed(2)+'R across '+s.losses+' of them'
+                   : ' · no losing trades yet')},
       {k:'Expectancy', v:(s.expR>=0?'+':'')+s.expR.toFixed(3)+'R', s:'per trade', cls:s.expR>=0?'pos':'neg'},
       {k:'Total', v:(s.totalR>=0?'+':'')+s.totalR.toFixed(1)+'R', s:fmt$(s.netPL)+' net', cls:s.totalR>=0?'pos':'neg'},
       {k:'Avg risk', v:s.riskPct!=null? fmtPct(s.riskPct,2) : '—', s:'of account'},
@@ -3212,8 +3235,8 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         steps.push(`<strong>You are on the top ${cap(planK)} rung.</strong> Further profit should come out as payouts, not bigger accounts.`);
       }
       const prev = rungs[rungs.indexOf(affordable)-1];
-      steps.push(`<strong>Step down to ${prev? fmt$(prev.sz) : 'paper trading'} when</strong> either happens: the bankroll falls under <code>${fmt$(affordable.need)}</code>, or your rolling 20-trade average goes negative. Stepping down is what keeps a bad run from becoming a blown bankroll.`);
-      steps.push(`<strong>Hard stop:</strong> if the bankroll halves from its peak, stop buying entirely and go back to the Journal for 30 trades. No exceptions, no "one more".`);
+      steps.push(`<strong>${prev? fmt$(prev.sz) : 'Paper'} is the rung below</strong>, reached when the bankroll falls under <code>${fmt$(affordable.need)}</code> or your rolling 20-trade average goes negative.`);
+      steps.push(`<strong>Half the peak bankroll</strong> is the point at which nothing on this ladder is affordable at the sizing above.`);
     }
     $('ladderSteps').innerHTML=steps.map(t=>`<li>${t}</li>`).join('');
   }
@@ -3658,8 +3681,11 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
   // own daily loss limit and its own drawdown floor, so a trade taken on another account must not
   // consume a slot here. Returns the trades themselves so the rule check can name them — an
   // unexplained count is impossible to argue with when it looks wrong.
+  // Which trading day this check belongs to. In replay that is the day on the replay chart, so
+  // the daily limit and the trade budget count against the right day rather than against today.
+  function checkDay(){ return tradingDay(replayOn() ? replayWhenMs() : Date.now()); }
   function tradesTodayList(){
-    const d=tradingDay();
+    const d=checkDay();
     return journal.filter(t=>(t.date===d || t.dateClosed===d) && jAcct(t)===activeAcctId);
   }
   const tradesToday = () => tradesTodayList().length;
@@ -3909,8 +3935,8 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
       $('cBuffer').querySelector('tbody').innerHTML=rows.join('');
       const spare=b.allowance-b.worstCase;
       $('cBufferNote').textContent = spare>0
-        ? `Every remaining trade losing at its stop costs ${fmt$2(b.worstCase)} of the ${fmt$(b.allowance)} limit, leaving ${fmt$2(spare)} (${((spare/b.allowance)*100).toFixed(0)}%) as the slippage buffer. That buffer absorbs fills up to ${breakBps.toFixed(0)} bps past your stops — ${(breakBps/Math.max(bps,1)).toFixed(1)}× the ${bps} bps expected in these conditions. Stick to ${b.n} trades and never widen a stop.`
-        : `Warning: the remaining trades would breach at their stops alone. Lower the percentage of the limit you use or cut the trades per day.`;
+        ? `Every remaining trade losing at its stop costs ${fmt$2(b.worstCase)} of the ${fmt$(b.allowance)} limit, leaving ${fmt$2(spare)} (${((spare/b.allowance)*100).toFixed(0)}%) as the slippage buffer. That buffer absorbs fills up to ${breakBps.toFixed(0)} bps past your stops — ${(breakBps/Math.max(bps,1)).toFixed(1)}× the ${bps} bps expected in these conditions. It holds for ${b.n} trades at the stops as entered.`
+        : `The remaining trades would spend more than the ${fmt$(b.allowance)} limit at their stops alone, before any slippage.`;
     } else { bcard.hidden=true; $('cWhyWrap').hidden=true; }
 
     // day budget slots
@@ -3942,7 +3968,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
         d:`${Math.max(0,b.left-1)} left after this one. Counted${onWho} today: ${counted}.`});
       // sizing follows your rule; this only reports where that rule lands against the static floor
       if(b.streakBreaches) checks.push({s:'warn', t:'A normal losing run would clear the static floor',
-        d:`${b.lossesToBreach} straight losses at ${fmt$2(b.perTrade)} spends the ${(st.p.maxDD*100).toFixed(1)}% max drawdown, and a ${b.streak}-loss run is normal at ${fmtPct(st.p.winRate)} wins. Your call — widen the buffer or take fewer trades a day if you want more room.`});
+        d:`${b.lossesToBreach} straight losses at ${fmt$2(b.perTrade)} spends the ${(st.p.maxDD*100).toFixed(1)}% max drawdown, and a ${b.streak}-loss run is normal at ${fmtPct(st.p.winRate)} wins.`});
       else checks.push({s:'ok', t:'Survives a normal losing run',
         d:`A ${b.streak}-loss run at ${fmt$2(b.perTrade)} costs ${fmt$2(b.perTrade*b.streak)}, inside the ${fmt$(st.p.acct*st.p.maxDD)} static drawdown.`});
     }
@@ -3983,7 +4009,8 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     else checks.push({s:'ok',t:'Holding cost budgeted',d:`${fmt$2(finFee)} for up to ${holdH2}h (${(bleedPerDay*100).toFixed(1)}% of risk per day). Close by then to stay inside it.`});
 
     const stt = journalStats();
-    if(stt && stt.streak<=-3) checks.push({s:'warn',t:`${Math.abs(stt.streak)} losses in a row`,d:'Your journal shows a losing streak. Halve the size or stand down for the day.'});
+    if(stt && stt.streak<=-3) checks.push({s:'warn',t:`${Math.abs(stt.streak)} losses in a row`,
+      d:`Your last ${Math.abs(stt.streak)} closed trades were losses. Stated because the journal shows it, not as a suggestion.`});
 
     const fails=checks.filter(c=>c.s==='fail').length, warns=checks.filter(c=>c.s==='warn').length;
     const box=$('cVerdict');
@@ -4020,27 +4047,62 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     $('cLog').disabled = !(units>0 && risk>0);
   }
 
+  // Everything here is already in the journal, so none of it is typed. It is all for THIS
+  // account only - another account's losses sit against its own daily limit - and for the day
+  // the check is about, which in replay is the day on the chart.
   function syncCheckerToday(){
-    // These mirror the journal for THIS account only. Another account's losses sit against its
-    // own daily limit, so folding them in here would shrink a limit that has not moved.
-    // They must also reset to zero when the journal empties, otherwise a deleted or closed
-    // trade leaves a stale figure skewing every later calculation.
-    const today = tradingDay();
-    const mine  = journal.filter(t=>jAcct(t)===activeAcctId);
-    const a = activeAccount();
-    const who = a ? 'on '+acctSay(a) : 'with no account selected';
+    const day  = checkDay();
+    const a    = activeAccount();
+    const mine = journal.filter(t=>jAcct(t)===activeAcctId);
+    const who  = a ? 'on '+acctSay(a) : 'with no account selected';
+    const dayOf = t => t.dateClosed||t.date||'';
+    const sum = xs => Math.round(xs.reduce((x,t)=>x+(+t.pl||0),0));
+
+    const closed = mine.filter(t=>t.status!=='open');
+    const size   = a ? a.size : (+$('acct').value||0);
+    const start  = size + sum(closed.filter(t=>dayOf(t) < day));
+    $('cDayStart').value = Math.round(start);
+    $('cDayStartHint').textContent = a
+      ? fmt$(size)+' account plus '+fmt$2(start-size)+' closed before '+showDay(day)+
+        '. The daily loss limit is measured from it.'
+      : 'No account selected, so this is the size set on New Eval.';
+
     // realised P/L lands on the day the trade was closed, which is the day the limit sees it
-    const todays = mine.filter(t=>t.status!=='open' && (t.dateClosed||t.date)===today);
-    $('cToday').value = todays.length ? Math.round(todays.reduce((x,t)=>x+(+t.pl||0),0)) : 0;
+    const todays = closed.filter(t=>dayOf(t)===day);
+    $('cToday').value = sum(todays);
     $('cTodayHint').textContent = todays.length
-      ? 'From '+todays.length+' trade'+(todays.length===1?'':'s')+' closed today '+who+'. Edit if you traded outside the journal.'
-      : 'No trades closed today '+who+'. Negative if you are down.';
+      ? 'From '+todays.length+' trade'+(todays.length===1?'':'s')+' closed '+showDay(day)+' '+who+'.'
+      : 'Nothing closed on '+showDay(day)+' '+who+'.';
 
     const open = mine.filter(t=>t.status==='open');
     $('cOpen').value = open.length ? Math.round(open.reduce((x,t)=>x+(+t.risk||0),0)) : 0;
     $('cOpenHint').textContent = open.length
-      ? 'From '+open.length+' open position'+(open.length===1?'':'s')+' '+who+'.'
-      : 'No open positions '+who+'. Enter manually if you have any.';
+      ? 'From '+open.length+' open position'+(open.length===1?'':'s')+' '+who+
+        ' - what you would lose if every one hit its stop.'
+      : 'Nothing open '+who+'.';
+
+    // floating P/L: only the positions actually showing a price can be marked
+    let float=0, marked=0;
+    for(const t of open){
+      const px = markFor(t);
+      if(px==null || !priceable(t)) continue;
+      const c = settleCalc(t, px, Date.now(), 'taker');
+      if(c){ float += c.net; marked++; }
+    }
+    $('cFloat').value = Math.round(float);
+    $('cFloatHint').textContent = open.length
+      ? marked+' of '+open.length+' open position'+(open.length===1?'':'s')+' marked to a price. '+
+        'Breakout counts open positions - equity, not balance.'
+      : 'Nothing open to mark.';
+
+    const el=$('cStateDay');
+    if(el) el.textContent = showDay(day)+(replayOn()?' \u00b7 replay':'');
+
+    // the balance you actually have now, so the account list is never stale
+    if(a){
+      const bal = Math.round(size + sum(closed));
+      if(a.bal !== bal){ a.bal = bal; saveAccounts(); }
+    }
   }
 
   // ================= orchestration =================
@@ -4201,17 +4263,7 @@ try{if(localStorage.getItem('prop-firm-edge-theme')==='light')document.documentE
     if(e.target.closest('[data-paper]')) openPaperAccount();
   });
 
-  $('cAcctSel').addEventListener('change',()=>{
-    const v=$('cAcctSel').value;
-    activeAcctId = v===''? null : +v;
-    saveAccounts(); renderAccounts(); syncAccountToChecker(); syncCheckerToday(); renderChecker();
-    renderJournal(); renderJournalStats(); renderLive(); debounced();
-  });
-  // remember the day-start balance against the selected account
-  $('cDayStart').addEventListener('change',()=>{
-    const a=activeAccount();
-    if(a){ a.bal=+$('cDayStart').value||a.size; saveAccounts(); renderAccounts(); }
-  });
+  // the balance is read off the journal now, so there is nothing here to remember
 
   // log the checked trade straight into the journal as an open position
   $('cLog').addEventListener('click',()=>{
